@@ -1,0 +1,111 @@
+[
+  {
+    "id": "transferencia-rechazada",
+    "category": "Transferencias",
+    "title": "¿Por qué se rechaza una transferencia?",
+    "summary": "Causas comunes de rechazo y cómo reprocesarla.",
+    "steps": [
+      "Verifica en el módulo de Transferencias el código de rechazo devuelto por el banco.",
+      "Confirma que la cuenta destino esté activa y el número esté bien digitado.",
+      "Revisa que el cliente tenga saldo disponible suficiente, incluyendo comisiones.",
+      "Si el código es de 'cuenta bloqueada', indícale al cliente que contacte a su banco.",
+      "Si el código es de 'datos inconsistentes', corrige la información y reenvía la transferencia."
+    ],
+    "notes": [
+      "Los rechazos por mantenimiento del banco destino suelen resolverse solos en unos minutos.",
+      "Nunca reintentes más de 3 veces seguidas la misma transferencia rechazada."
+    ],
+    "tip": "Si el código de rechazo no aparece en el manual, escala el caso con el número exacto del código.",
+    "chat_query": "Una transferencia de un cliente fue rechazada, ¿qué debo revisar primero?"
+  },
+  {
+    "id": "tarjeta-bloqueada",
+    "category": "Tarjetas",
+    "title": "¿Cómo desbloquear una tarjeta?",
+    "summary": "Pasos para levantar un bloqueo temporal por intentos fallidos.",
+    "steps": [
+      "Ingresa al módulo de Tarjetas y busca al cliente por número de documento.",
+      "Verifica el motivo del bloqueo (intentos fallidos, reporte de fraude, solicitud del cliente).",
+      "Si es por intentos fallidos, valida la identidad del cliente con las preguntas de seguridad.",
+      "Levanta el bloqueo desde la opción 'Gestionar estado de la tarjeta'.",
+      "Confirma con el cliente que la tarjeta vuelve a funcionar con una transacción de prueba."
+    ],
+    "notes": [
+      "Si el bloqueo es por reporte de fraude, no lo levantes: escala directamente al área de fraude."
+    ],
+    "tip": "Un bloqueo por intentos fallidos se resetea solo después de 24 horas si el cliente no llama.",
+    "chat_query": "¿Cómo desbloqueo la tarjeta de un cliente que falló varias veces la clave?"
+  },
+  {
+    "id": "pse-pago-no-reflejado",
+    "category": "Pagos PSE",
+    "title": "El pago por PSE no se refleja",
+    "summary": "Qué revisar cuando el cliente pagó pero el sistema no lo muestra.",
+    "steps": [
+      "Pide al cliente el número de referencia o el comprobante del banco.",
+      "Busca la transacción en el módulo de Pagos por referencia, no por fecha.",
+      "Si aparece como 'pendiente', espera la confirmación automática (hasta 2 horas hábiles).",
+      "Si no aparece ninguna transacción, verifica con el cliente que el pago se haya completado del lado del banco.",
+      "Si el banco confirma el pago y el sistema no lo tiene, registra el caso para conciliación manual."
+    ],
+    "notes": [
+      "Los pagos los fines de semana o festivos pueden demorar más en confirmarse."
+    ],
+    "tip": "El estado 'pendiente' no es un error: es normal mientras el banco confirma el pago.",
+    "chat_query": "Un cliente dice que pagó por PSE pero no aparece reflejado en el sistema, ¿qué hago?"
+  },
+  {
+    "id": "clave-olvidada",
+    "category": "Seguridad",
+    "title": "El cliente olvidó su clave de acceso",
+    "summary": "Procedimiento para restablecer el acceso de forma segura.",
+    "steps": [
+      "Verifica la identidad del cliente con al menos dos preguntas de seguridad.",
+      "Ve al módulo de Clientes y selecciona 'Restablecer clave de acceso'.",
+      "El sistema enviará un enlace temporal al correo o celular registrado.",
+      "Indícale al cliente que el enlace expira en 30 minutos.",
+      "Confirma que el cliente pueda iniciar sesión antes de cerrar el caso."
+    ],
+    "notes": [
+      "Nunca le digas la clave nueva por teléfono; el cliente debe crearla él mismo con el enlace."
+    ],
+    "tip": "Si el correo o celular registrado ya no es del cliente, se debe verificar identidad presencial.",
+    "chat_query": "El cliente olvidó su clave y el correo registrado ya no le llega, ¿qué protocolo sigo?"
+  },
+  {
+    "id": "error-sistema-500",
+    "category": "Errores del sistema",
+    "title": "El sistema muestra un error al guardar",
+    "summary": "Qué hacer ante errores inesperados en cualquier módulo.",
+    "steps": [
+      "Pide al cliente o agente una captura de pantalla del error completo.",
+      "Verifica si el error incluye un código (ej. ERR-500, ERR-403) y búscalo en el manual técnico.",
+      "Pide que recargue la página e intente nuevamente la misma acción.",
+      "Si persiste, verifica el estado general del sistema en el panel de monitoreo interno.",
+      "Registra el caso con el código de error y la hora exacta para el equipo técnico."
+    ],
+    "notes": [
+      "No pidas al cliente que reintente más de 2 veces la misma operación: podría duplicar registros."
+    ],
+    "tip": "Los errores ERR-5xx casi siempre son del servidor, no del usuario; escala directo.",
+    "chat_query": "El sistema me da un error ERR-500 al guardar una operación, ¿qué debo hacer?"
+  },
+  {
+    "id": "cuenta-inactiva",
+    "category": "Cuentas",
+    "title": "La cuenta del cliente aparece inactiva",
+    "summary": "Diferencia entre cuenta inactiva, suspendida y cerrada.",
+    "steps": [
+      "Consulta el estado exacto de la cuenta en el módulo de Cuentas.",
+      "Si dice 'inactiva por inactividad', reactívala validando identidad del cliente.",
+      "Si dice 'suspendida', revisa el motivo antes de reactivar (puede ser por mora o alerta).",
+      "Si dice 'cerrada', no se puede reactivar: se debe abrir una cuenta nueva.",
+      "Documenta el cambio de estado en el historial del cliente."
+    ],
+    "notes": [
+      "Una cuenta 'suspendida por alerta' solo la puede reactivar el área de cumplimiento."
+    ],
+    "tip": "Revisa siempre el motivo antes de reactivar: no todas las inactivaciones se resuelven igual.",
+    "chat_query": "La cuenta de un cliente aparece inactiva, ¿cómo sé si la puedo reactivar yo mismo?"
+  }
+]

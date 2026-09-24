@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Asistente de Soporte Técnico</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-mark">◆</span>
+      <div class="brand-text">
+        <span class="brand-name" id="brand-name">Asistente</span>
+        <span class="brand-sub" id="brand-sub">Soporte técnico</span>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item is-active" data-view="chat">
+        <span class="nav-icon">💬</span>
+        <span>
+          <span class="nav-title">Chat</span>
+          <span class="nav-desc">Consulta tus dudas</span>
+        </span>
+      </button>
+      <button class="nav-item" data-view="faqs">
+        <span class="nav-icon">📘</span>
+        <span>
+          <span class="nav-title">Soluciones rápidas</span>
+          <span class="nav-desc">Casos frecuentes</span>
+        </span>
+      </button>
+    </nav>
+
+    <div class="index-status" id="index-status">
+      <span class="dot"></span>
+      <span id="index-status-text">Verificando manuales…</span>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <header class="topbar">
+      <h1 id="topbar-title">Chat</h1>
+      <p id="topbar-sub">Pregunta lo que necesites sobre los manuales internos.</p>
+    </header>
+
+    <!-- ===== VISTA: CHAT ===== -->
+    <section id="view-chat" class="view is-active">
+      <div class="chat-toolbar">
+        <button id="btn-new-chat" class="btn-ghost">＋ Nueva conversación</button>
+      </div>
+
+      <div class="chat-window" id="chat-window">
+        <div class="chat-empty" id="chat-empty">
+          <p>Aún no hay mensajes.</p>
+          <p class="muted">Escribe abajo el problema que reportó el cliente o el agente.</p>
+        </div>
+      </div>
+
+      <form id="chat-form" class="chat-input-bar">
+        <textarea id="chat-input" rows="1" placeholder="Escribe el problema o la duda…"></textarea>
+        <button type="submit" id="chat-send">Enviar</button>
+      </form>
+    </section>
+
+    <!-- ===== VISTA: SOLUCIONES RÁPIDAS ===== -->
+    <section id="view-faqs" class="view">
+      <div class="faqs-search">
+        <input type="text" id="faq-search" placeholder="Buscar solución por palabra clave…" />
+      </div>
+
+      <div class="faqs-categories" id="faq-categories"></div>
+
+      <div class="faqs-body">
+        <div class="faqs-list" id="faqs-list"></div>
+        <div class="faqs-detail" id="faqs-detail">
+          <div class="faqs-detail-empty">
+            <p>Selecciona un caso de la lista para ver el detalle.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
