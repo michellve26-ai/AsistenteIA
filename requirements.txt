@@ -8,3 +8,5 @@ fastembed
 pypdf
 python-dotenv
 streamlit
+fastapi
+uvicorn[standard]
