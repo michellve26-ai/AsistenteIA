@@ -1,31 +1,39 @@
-"""
-Interfaz — Asistente de Soporte Técnico (RAG)
-Ejecutar con: streamlit run app.py
-
-Esta versión cambia únicamente la capa visual de Streamlit.
-No modifica src/, api.py, ChromaDB, PDFs, .env ni la lógica del RAG.
-"""
-
 import html
 import re
 
 import streamlit as st
 
+print("1 - Streamlit importado correctamente")
+
 from src import config
+print("2 - config cargado correctamente")
+
 from src.faqs import FAQS
+print("3 - FAQS cargadas correctamente")
+
 from src.ingest import load_pdfs, split_documents
+print("4 - ingest cargado correctamente")
+
 from src.vectorstore import (
     get_embeddings,
     build_vectorstore,
     load_vectorstore,
     index_exists,
 )
-from src.rag_chain import get_llm, get_prompt_template, rag_pipeline
+print("5 - vectorstore cargado correctamente")
+
+from src.rag_chain import (
+    get_llm,
+    get_prompt_template,
+    rag_pipeline,
+)
+print("6 - rag_chain cargado correctamente")
 
 
 # -----------------------------------------------------------------------------
 # Configuración de página
 # -----------------------------------------------------------------------------
+
 st.set_page_config(
     page_title=f"{config.ASSISTANT_NAME} | OficinaPro",
     page_icon="💬",
@@ -33,10 +41,13 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+print("7 - set_page_config ejecutado correctamente")
+
 
 # -----------------------------------------------------------------------------
-# Estilos visuales — solo presentación, sin alterar lógica/rutas
+# Estilos visuales
 # -----------------------------------------------------------------------------
+
 st.markdown(
     """
     <style>
@@ -320,7 +331,6 @@ st.markdown(
             font-size: 13px;
         }
 
-        /* Inputs */
         div[data-testid="stTextInput"] input {
             min-height: 45px;
             border-radius: 12px;
@@ -332,7 +342,6 @@ st.markdown(
             box-shadow: 0 0 0 1px #1478f2;
         }
 
-        /* Botones */
         .stButton > button {
             border-radius: 11px;
             min-height: 42px;
@@ -349,7 +358,6 @@ st.markdown(
             border-color: #8ec3ff;
         }
 
-        /* Chat */
         [data-testid="stChatMessage"] {
             border: 1px solid #e5ebf3;
             border-radius: 14px;
@@ -362,313 +370,40 @@ st.markdown(
             border-radius: 14px;
         }
 
-        /* Sidebar administrativo */
         [data-testid="stSidebar"] {
             background: #f8fafc;
             border-right: 1px solid #e7edf4;
         }
 
         @media (max-width: 900px) {
-            .op-top-help { display: none; }
-            .op-brand-title { font-size: 21px; }
-            .op-page-title { font-size: 25px; }
-            .op-nav-card { min-height: auto; }
-        }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-
-
-# -----------------------------------------------------------------------------
-# Refuerzo visual: alto contraste, texto negro y organización limpia
-# SOLO estilos. No modifica rutas, RAG, ChromaDB, PDFs ni lógica.
-# -----------------------------------------------------------------------------
-st.markdown(
-    """
-    <style>
-        /* Fondo general */
-        html, body, [data-testid="stAppViewContainer"],
-        [data-testid="stMain"] {
-            background: #f4f6f8 !important;
-            color: #111111 !important;
-        }
-
-        /* Texto general completamente visible */
-        .stApp,
-        .stApp p,
-        .stApp span,
-        .stApp label,
-        .stApp li,
-        .stApp div,
-        .stApp small,
-        .stApp strong,
-        .stApp h1,
-        .stApp h2,
-        .stApp h3,
-        .stApp h4,
-        .stApp h5,
-        .stApp h6 {
-            color: #111111;
-        }
-
-        /* Excepciones: cabecera azul */
-        .op-topbar,
-        .op-topbar * {
-            color: #ffffff !important;
-        }
-
-        .op-brand-title span {
-            color: #69b7ff !important;
-        }
-
-        /* Contenedor principal más ordenado */
-        .block-container {
-            max-width: 1480px !important;
-            padding-top: 1rem !important;
-            padding-left: 1.5rem !important;
-            padding-right: 1.5rem !important;
-            padding-bottom: 2rem !important;
-        }
-
-        /* Cabecera */
-        .op-topbar {
-            border-radius: 14px !important;
-            margin-bottom: 20px !important;
-            padding: 18px 24px !important;
-            box-shadow: 0 5px 18px rgba(0, 0, 0, .10) !important;
-        }
-
-        /* Navegación lateral interna */
-        .op-nav-card {
-            background: #ffffff !important;
-            border: 1px solid #cfd6df !important;
-            border-radius: 14px !important;
-            padding: 16px !important;
-            min-height: 540px !important;
-            box-shadow: 0 3px 12px rgba(0,0,0,.05) !important;
-        }
-
-        .op-nav-title,
-        .op-section-label {
-            color: #222222 !important;
-            font-weight: 800 !important;
-        }
-
-        .op-nav-note {
-            background: #f7f7f7 !important;
-            border: 1px solid #d5d9df !important;
-            color: #222222 !important;
-        }
-
-        /* Títulos */
-        .op-page-title {
-            color: #111111 !important;
-            font-size: 31px !important;
-            font-weight: 800 !important;
-        }
-
-        .op-page-subtitle {
-            color: #333333 !important;
-            font-size: 14px !important;
-        }
-
-        /* Paneles */
-        .op-panel,
-        .op-faq-detail,
-        .op-chat-intro {
-            background: #ffffff !important;
-            border: 1px solid #d3d9e0 !important;
-            border-radius: 14px !important;
-            box-shadow: 0 3px 12px rgba(0,0,0,.04) !important;
-        }
-
-        /* Tarjetas FAQ */
-        .op-faq-card {
-            background: #ffffff !important;
-            border: 1px solid #cfd6df !important;
-            border-radius: 12px !important;
-            padding: 14px 15px !important;
-            margin-bottom: 10px !important;
-        }
-
-        .op-faq-card:hover {
-            border-color: #1478f2 !important;
-            box-shadow: 0 4px 12px rgba(20,120,242,.10) !important;
-        }
-
-        .op-faq-category {
-            background: #eaf4ff !important;
-            color: #0b57a5 !important;
-            border: 1px solid #c9e1fb !important;
-            font-weight: 800 !important;
-        }
-
-        .op-faq-question {
-            color: #111111 !important;
-            font-weight: 800 !important;
-        }
-
-        .op-detail-heading {
-            color: #111111 !important;
-            font-weight: 800 !important;
-        }
-
-        .op-detail-source {
-            color: #333333 !important;
-        }
-
-        /* Cajas de respuesta */
-        .op-steps-box {
-            background: #f7fbff !important;
-            border: 1px solid #b9d8fb !important;
-            color: #111111 !important;
-        }
-
-        .op-steps-box * {
-            color: #111111 !important;
-        }
-
-        .op-info-box {
-            background: #f3fbf6 !important;
-            border: 1px solid #b9dec7 !important;
-            color: #111111 !important;
-        }
-
-        .op-info-box * {
-            color: #111111 !important;
-        }
-
-        .op-status-ok {
-            background: #eef9f2 !important;
-            color: #111111 !important;
-            border: 1px solid #b9dec7 !important;
-        }
-
-        .op-status-warn {
-            background: #fff8e8 !important;
-            color: #111111 !important;
-            border: 1px solid #ebd393 !important;
-        }
-
-        /* Inputs */
-        div[data-testid="stTextInput"] input,
-        div[data-testid="stTextInput"] input::placeholder,
-        [data-testid="stChatInput"] textarea,
-        [data-testid="stChatInput"] textarea::placeholder {
-            color: #111111 !important;
-        }
-
-        div[data-testid="stTextInput"] input,
-        [data-testid="stChatInput"] textarea {
-            background: #ffffff !important;
-            border: 1px solid #bfc8d3 !important;
-        }
-
-        /* Botones */
-        .stButton > button {
-            background: #ffffff !important;
-            color: #111111 !important;
-            border: 1px solid #bfc8d3 !important;
-            border-radius: 10px !important;
-            font-weight: 700 !important;
-        }
-
-        .stButton > button:hover {
-            color: #0b57a5 !important;
-            border-color: #1478f2 !important;
-            background: #f4f9ff !important;
-        }
-
-        .stButton > button[kind="primary"] {
-            background: #1478f2 !important;
-            border-color: #1478f2 !important;
-            color: #ffffff !important;
-        }
-
-        .stButton > button[kind="primary"] * {
-            color: #ffffff !important;
-        }
-
-        /* Radio / categorías */
-        [data-testid="stRadio"] label,
-        [data-testid="stRadio"] label span,
-        [data-testid="stRadio"] div {
-            color: #111111 !important;
-        }
-
-        /* Chat */
-        [data-testid="stChatMessage"] {
-            background: #ffffff !important;
-            border: 1px solid #d3d9e0 !important;
-            color: #111111 !important;
-            box-shadow: 0 2px 8px rgba(0,0,0,.03) !important;
-        }
-
-        [data-testid="stChatMessage"] * {
-            color: #111111 !important;
-        }
-
-        /* Sidebar administrativo */
-        [data-testid="stSidebar"] {
-            background: #ffffff !important;
-            border-right: 1px solid #d3d9e0 !important;
-        }
-
-        [data-testid="stSidebar"] * {
-            color: #111111 !important;
-        }
-
-        /* Sliders */
-        [data-testid="stSlider"] * {
-            color: #111111 !important;
-        }
-
-        /* Alertas Streamlit */
-        [data-testid="stAlert"] {
-            color: #111111 !important;
-            border-radius: 10px !important;
-        }
-
-        [data-testid="stAlert"] * {
-            color: #111111 !important;
-        }
-
-        /* Captions */
-        [data-testid="stCaptionContainer"],
-        [data-testid="stCaptionContainer"] * {
-            color: #333333 !important;
-        }
-
-        /* Mejor separación en columnas */
-        [data-testid="stHorizontalBlock"] {
-            gap: 1rem !important;
-        }
-
-        @media (max-width: 900px) {
-            .block-container {
-                padding-left: .8rem !important;
-                padding-right: .8rem !important;
+            .op-top-help {
+                display: none;
             }
 
-            .op-nav-card {
-                min-height: auto !important;
+            .op-brand-title {
+                font-size: 21px;
             }
 
             .op-page-title {
-                font-size: 25px !important;
+                font-size: 25px;
+            }
+
+            .op-nav-card {
+                min-height: auto;
             }
         }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+print("8 - estilos principales cargados")
 
 
 # -----------------------------------------------------------------------------
 # Estado de interfaz
 # -----------------------------------------------------------------------------
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -681,133 +416,225 @@ if "selected_faq" not in st.session_state:
 if "faq_category" not in st.session_state:
     st.session_state.faq_category = "Todas"
 
+print("9 - session_state inicializado")
+
 
 # -----------------------------------------------------------------------------
 # Recursos RAG cacheados
-# Se cargan solo cuando son necesarios, para que la interfaz pueda abrir incluso
-# si el modelo/Internet todavía no están disponibles.
 # -----------------------------------------------------------------------------
+
 @st.cache_resource(show_spinner="Cargando modelo de embeddings...")
 def _get_embeddings():
+    print("10 - entrando a get_embeddings")
     return get_embeddings()
 
 
-@st.cache_resource(show_spinner="Cargando modelo de lenguaje (Groq)...")
+@st.cache_resource(show_spinner="Cargando modelo de lenguaje...")
 def _get_llm():
+    print("11 - entrando a get_llm")
     return get_llm()
 
 
 @st.cache_resource(show_spinner="Cargando base vectorial...")
 def _get_vectorstore(_embeddings):
+    print("12 - entrando a load_vectorstore")
     return load_vectorstore(_embeddings)
 
 
 def _resolver_pregunta(pregunta: str, top_k: int) -> dict | None:
-    """Ejecuta el RAG con la misma lógica existente."""
+    print("13 - resolver pregunta")
+
     if not index_exists():
+        print("13.1 - no existe índice")
         return None
+
+    print("13.2 - índice encontrado")
 
     embeddings = _get_embeddings()
     llm = _get_llm()
     prompt_template = get_prompt_template()
     vector_store = _get_vectorstore(embeddings)
-    return rag_pipeline(vector_store, llm, prompt_template, pregunta, k=top_k)
+
+    return rag_pipeline(
+        vector_store,
+        llm,
+        prompt_template,
+        pregunta,
+        k=top_k,
+    )
 
 
 def _mostrar_fuentes(fragmentos: list) -> None:
     with st.expander(f"📎 Fuentes consultadas ({len(fragmentos)})"):
         for i, doc in enumerate(fragmentos, 1):
-            fuente = doc.metadata.get("source", "?").split("/")[-1].split("\\")[-1]
+            fuente = (
+                doc.metadata.get("source", "?")
+                .split("/")[-1]
+                .split("\\")[-1]
+            )
             pagina = doc.metadata.get("page", "?")
+
             st.markdown(f"**[{i}] {fuente} — Pág. {pagina}**")
+
             contenido = doc.page_content.strip()
-            st.caption(contenido[:300] + ("..." if len(contenido) > 300 else ""))
+
+            st.caption(
+                contenido[:300]
+                + ("..." if len(contenido) > 300 else "")
+            )
 
 
 def _faq_preview(answer: str) -> str:
-    """Genera una descripción breve a partir de la respuesta de una FAQ."""
     clean = re.sub(r"[#>*`]+", "", answer)
     clean = re.sub(r"\s+", " ", clean).strip()
+
     if len(clean) > 100:
         return clean[:100].rstrip() + "..."
+
     return clean
 
 
 def _category_icon(category: str) -> str:
     cat = category.lower()
+
     if "factur" in cat:
         return "🧾"
+
     if "invent" in cat:
         return "📦"
+
     if "cartera" in cat:
         return "💵"
+
     if "cliente" in cat or "proveedor" in cat:
         return "👥"
+
     if "banco" in cat or "caja" in cat:
         return "🏦"
+
     if "nota" in cat:
         return "📄"
+
     return "📘"
 
 
+print("14 - funciones definidas correctamente")
+
+
 # -----------------------------------------------------------------------------
-# Cabecera corporativa
+# Cabecera
 # -----------------------------------------------------------------------------
+
 st.markdown(
     """
     <div class="op-topbar">
         <div class="op-brand">
             <div class="op-brand-icon">✦</div>
+
             <div>
-                <div class="op-brand-title">OFICINA<span>PRO.CO</span></div>
-                <div class="op-brand-subtitle">Asistente virtual de soporte</div>
+                <div class="op-brand-title">
+                    OFICINA<span>PRO.CO</span>
+                </div>
+
+                <div class="op-brand-subtitle">
+                    Asistente virtual de soporte
+                </div>
             </div>
         </div>
-        <div class="op-top-help">ⓘ &nbsp; Tu aliado en la solución de dudas de OficinaPro</div>
+
+        <div class="op-top-help">
+            ⓘ &nbsp; Tu aliado en la solución de dudas de OficinaPro
+        </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
+print("15 - cabecera mostrada")
+
 
 # -----------------------------------------------------------------------------
-# Panel administrativo existente: se conserva, solo queda colapsado
+# Sidebar
 # -----------------------------------------------------------------------------
+
 with st.sidebar:
     st.markdown("### ⚙️ Base de conocimiento")
+
     st.caption(f"Manuales: `{config.PDF_DIR}`")
 
-    if index_exists():
+    print("16 - comprobando index_exists sidebar")
+
+    try:
+        indice_disponible = index_exists()
+        print(f"17 - index_exists sidebar: {indice_disponible}")
+    except Exception as exc:
+        print(f"ERROR index_exists sidebar: {exc}")
+        indice_disponible = False
+
+    if indice_disponible:
         st.success("Índice vectorial disponible.")
     else:
         st.warning("Aún no hay índice vectorial.")
 
-    top_k = st.slider("Fragmentos a recuperar (k)", 2, 10, config.TOP_K)
+    top_k = st.slider(
+        "Fragmentos a recuperar (k)",
+        2,
+        10,
+        config.TOP_K,
+    )
 
-    if st.button("🔄 (Re)indexar manuales PDF", use_container_width=True):
+    if st.button(
+        "🔄 (Re)indexar manuales PDF",
+        use_container_width=True,
+    ):
         with st.spinner("Cargando y procesando PDFs..."):
             embeddings = _get_embeddings()
             documents = load_pdfs()
             chunks = split_documents(documents)
-            build_vectorstore(chunks, embeddings, rebuild=True)
+
+            build_vectorstore(
+                chunks,
+                embeddings,
+                rebuild=True,
+            )
+
         st.cache_resource.clear()
         st.success("Índice actualizado correctamente.")
 
-    if st.button("🧹 Borrar historial del chat", use_container_width=True):
+    if st.button(
+        "🧹 Borrar historial del chat",
+        use_container_width=True,
+    ):
         st.session_state.messages = []
         st.rerun()
 
 
+print("18 - sidebar cargado")
+
+
 # -----------------------------------------------------------------------------
-# Layout principal: navegación izquierda + contenido
+# Layout principal
 # -----------------------------------------------------------------------------
-nav_col, content_col = st.columns([1.15, 4.85], gap="large")
+
+nav_col, content_col = st.columns(
+    [1.15, 4.85],
+    gap="large",
+)
+
 
 with nav_col:
-    st.markdown('<div class="op-nav-card">', unsafe_allow_html=True)
-    st.markdown('<div class="op-nav-title">Soporte</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="op-nav-card">',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        '<div class="op-nav-title">Soporte</div>',
+        unsafe_allow_html=True,
+    )
 
     chat_active = st.session_state.main_view == "Chat"
+
     if st.button(
         "💬  Chat\n\nConsulta tus dudas",
         use_container_width=True,
@@ -817,7 +644,10 @@ with nav_col:
         st.session_state.main_view = "Chat"
         st.rerun()
 
-    faq_active = st.session_state.main_view == "Soluciones rápidas"
+    faq_active = (
+        st.session_state.main_view == "Soluciones rápidas"
+    )
+
     if st.button(
         "📖  Soluciones rápidas\n\nPreguntas frecuentes",
         use_container_width=True,
@@ -827,29 +657,61 @@ with nav_col:
         st.session_state.main_view = "Soluciones rápidas"
         st.rerun()
 
+    try:
+        estado_indice = index_exists()
+    except Exception as exc:
+        print(f"ERROR index_exists navegación: {exc}")
+        estado_indice = False
+
     st.markdown(
         f"""
         <div class="op-nav-note">
             <b>Estado del conocimiento</b><br>
-            {'● Índice listo para consultar' if index_exists() else '● Pendiente de indexación'}<br><br>
-            La configuración técnica sigue disponible en el menú lateral de Streamlit.
+
+            {
+                '● Índice listo para consultar'
+                if estado_indice
+                else '● Pendiente de indexación'
+            }
+
+            <br><br>
+
+            La configuración técnica sigue disponible
+            en el menú lateral de Streamlit.
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown(
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+print("19 - navegación cargada")
 
 
 # -----------------------------------------------------------------------------
-# Vista: Soluciones rápidas
+# Vista principal
 # -----------------------------------------------------------------------------
+
 with content_col:
+
     if st.session_state.main_view == "Soluciones rápidas":
+
         st.markdown(
             """
             <div class="op-page-title-wrap">
-                <div class="op-page-title">📖 Soluciones rápidas</div>
-                <div class="op-page-subtitle">Encuentra respuestas a los casos más comunes de OficinaPro y, si necesitas más detalle, continúa directamente en el chat.</div>
+                <div class="op-page-title">
+                    📖 Soluciones rápidas
+                </div>
+
+                <div class="op-page-subtitle">
+                    Encuentra respuestas a los casos más comunes
+                    de OficinaPro y, si necesitas más detalle,
+                    continúa directamente en el chat.
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -857,27 +719,49 @@ with content_col:
 
         filtro = st.text_input(
             "Buscar solución",
-            placeholder="🔎  Buscar por palabra clave: inventario, factura, cartera, banco, cliente...",
+            placeholder=(
+                "🔎 Buscar por palabra clave: inventario, "
+                "factura, cartera, banco, cliente..."
+            ),
             label_visibility="collapsed",
             key="faq_filter_visual",
         ).strip().lower()
 
-        categorias = ["Todas"] + sorted({faq["category"] for faq in FAQS})
+        categorias = [
+            "Todas"
+        ] + sorted(
+            {
+                faq["category"]
+                for faq in FAQS
+            }
+        )
+
         categoria_actual = st.radio(
             "Categoría",
             categorias,
-            index=categorias.index(st.session_state.faq_category)
-            if st.session_state.faq_category in categorias
-            else 0,
+            index=(
+                categorias.index(
+                    st.session_state.faq_category
+                )
+                if st.session_state.faq_category in categorias
+                else 0
+            ),
             horizontal=True,
             label_visibility="collapsed",
             key="faq_category_radio",
         )
+
         st.session_state.faq_category = categoria_actual
 
         faqs_visibles = []
+
         for original_index, faq in enumerate(FAQS):
-            coincide_categoria = categoria_actual == "Todas" or faq["category"] == categoria_actual
+
+            coincide_categoria = (
+                categoria_actual == "Todas"
+                or faq["category"] == categoria_actual
+            )
+
             coincide_texto = (
                 not filtro
                 or filtro in faq["question"].lower()
@@ -885,91 +769,219 @@ with content_col:
                 or filtro in faq.get("keywords", "").lower()
                 or filtro in faq["answer"].lower()
             )
+
             if coincide_categoria and coincide_texto:
-                faqs_visibles.append((original_index, faq))
+                faqs_visibles.append(
+                    (
+                        original_index,
+                        faq,
+                    )
+                )
 
         if not faqs_visibles:
-            st.info("No encontré una solución rápida con ese término. Puedes consultarlo en el Chat.")
-        else:
-            visible_indexes = [idx for idx, _ in faqs_visibles]
-            if st.session_state.selected_faq not in visible_indexes:
-                st.session_state.selected_faq = visible_indexes[0]
 
-            list_col, detail_col = st.columns([2.15, 2.65], gap="medium")
+            st.info(
+                "No encontré una solución rápida con ese término. "
+                "Puedes consultarlo en el Chat."
+            )
+
+        else:
+
+            visible_indexes = [
+                idx
+                for idx, _ in faqs_visibles
+            ]
+
+            if (
+                st.session_state.selected_faq
+                not in visible_indexes
+            ):
+                st.session_state.selected_faq = (
+                    visible_indexes[0]
+                )
+
+            list_col, detail_col = st.columns(
+                [2.15, 2.65],
+                gap="medium",
+            )
 
             with list_col:
-                st.markdown('<div class="op-panel">', unsafe_allow_html=True)
-                st.markdown('<div class="op-section-label">Casos frecuentes</div>', unsafe_allow_html=True)
+
+                st.markdown(
+                    '<div class="op-panel">',
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    '<div class="op-section-label">'
+                    'Casos frecuentes'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
 
                 for original_index, faq in faqs_visibles:
-                    icon = _category_icon(faq["category"])
-                    selected = original_index == st.session_state.selected_faq
+
+                    icon = _category_icon(
+                        faq["category"]
+                    )
+
+                    selected = (
+                        original_index
+                        == st.session_state.selected_faq
+                    )
 
                     st.markdown(
                         f"""
                         <div class="op-faq-card">
-                            <div class="op-faq-category">{html.escape(faq['category'])}</div>
-                            <div class="op-faq-question">{icon} &nbsp; {html.escape(faq['question'])}</div>
-                            <div style="color:#77879d;font-size:12px;margin-top:5px;line-height:1.35;">{html.escape(_faq_preview(faq['answer']))}</div>
+
+                            <div class="op-faq-category">
+                                {html.escape(faq['category'])}
+                            </div>
+
+                            <div class="op-faq-question">
+                                {icon} &nbsp;
+                                {html.escape(faq['question'])}
+                            </div>
+
+                            <div style="
+                                color:#77879d;
+                                font-size:12px;
+                                margin-top:5px;
+                                line-height:1.35;
+                            ">
+                                {
+                                    html.escape(
+                                        _faq_preview(
+                                            faq["answer"]
+                                        )
+                                    )
+                                }
+                            </div>
+
                         </div>
                         """,
                         unsafe_allow_html=True,
                     )
 
                     if st.button(
-                        "Ver solución" if not selected else "✓ Solución seleccionada",
+                        (
+                            "✓ Solución seleccionada"
+                            if selected
+                            else "Ver solución"
+                        ),
                         key=f"select_faq_{original_index}",
                         use_container_width=True,
-                        type="primary" if selected else "secondary",
+                        type=(
+                            "primary"
+                            if selected
+                            else "secondary"
+                        ),
                     ):
-                        st.session_state.selected_faq = original_index
+                        st.session_state.selected_faq = (
+                            original_index
+                        )
                         st.rerun()
 
-                st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown(
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
 
             with detail_col:
-                faq = FAQS[st.session_state.selected_faq]
-                st.markdown('<div class="op-faq-detail">', unsafe_allow_html=True)
-                st.markdown(
-                    f'<div class="op-faq-category">{html.escape(faq["category"])}</div>',
-                    unsafe_allow_html=True,
-                )
-                st.markdown(
-                    f'<div class="op-detail-heading">{html.escape(faq["question"])}</div>',
-                    unsafe_allow_html=True,
-                )
-                st.caption("Procedimiento recomendado según la base de conocimiento disponible.")
 
-                st.markdown('<div class="op-steps-box">', unsafe_allow_html=True)
-                st.markdown(faq["answer"])
-                st.markdown("</div>", unsafe_allow_html=True)
+                faq = FAQS[
+                    st.session_state.selected_faq
+                ]
 
                 st.markdown(
-                    f'<div class="op-detail-source">Fuente: {html.escape(faq["source"])}</div>',
+                    '<div class="op-faq-detail">',
                     unsafe_allow_html=True,
                 )
-                st.markdown("</div>", unsafe_allow_html=True)
+
+                st.markdown(
+                    f"""
+                    <div class="op-faq-category">
+                        {html.escape(faq["category"])}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    f"""
+                    <div class="op-detail-heading">
+                        {html.escape(faq["question"])}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                st.caption(
+                    "Procedimiento recomendado según "
+                    "la base de conocimiento disponible."
+                )
+
+                st.markdown(
+                    '<div class="op-steps-box">',
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    faq["answer"]
+                )
+
+                st.markdown(
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    f"""
+                    <div class="op-detail-source">
+                        Fuente:
+                        {html.escape(faq["source"])}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
 
                 st.write("")
+
                 if st.button(
                     "💬 Consultar este caso en el chat",
                     type="primary",
                     use_container_width=True,
                     key="faq_to_chat_visual",
                 ):
-                    st.session_state.pending_question = faq["question"]
+                    st.session_state.pending_question = (
+                        faq["question"]
+                    )
+
                     st.session_state.main_view = "Chat"
+
                     st.rerun()
 
-    # -------------------------------------------------------------------------
-    # Vista: Chat
-    # -------------------------------------------------------------------------
+
     else:
+
         st.markdown(
             """
             <div class="op-page-title-wrap">
-                <div class="op-page-title">💬 Chat de soporte</div>
-                <div class="op-page-subtitle">Consulta los manuales y la base de conocimiento de OficinaPro mediante el asistente RAG.</div>
+
+                <div class="op-page-title">
+                    💬 Chat de soporte
+                </div>
+
+                <div class="op-page-subtitle">
+                    Consulta los manuales y la base de conocimiento
+                    de OficinaPro mediante el asistente RAG.
+                </div>
+
             </div>
             """,
             unsafe_allow_html=True,
@@ -978,62 +990,176 @@ with content_col:
         st.markdown(
             """
             <div class="op-chat-intro">
-                <strong>¿Qué necesitas resolver?</strong>
-                <div>Describe el problema tal como lo reportaría un cliente o un agente de soporte. El asistente buscará información relacionada en los documentos indexados.</div>
+
+                <strong>
+                    ¿Qué necesitas resolver?
+                </strong>
+
+                <div>
+                    Describe el problema tal como lo reportaría
+                    un cliente o un agente de soporte.
+                    El asistente buscará información relacionada
+                    en los documentos indexados.
+                </div>
+
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        if not index_exists():
+        try:
+            indice_chat = index_exists()
+        except Exception as exc:
+            print(f"ERROR index_exists chat: {exc}")
+            indice_chat = False
+
+        if not indice_chat:
+
             st.markdown(
-                '<div class="op-status-warn">⚠️ La base vectorial aún no está disponible. Abre la configuración lateral y usa <b>(Re)indexar manuales PDF</b>.</div>',
+                """
+                <div class="op-status-warn">
+                    ⚠️ La base vectorial aún no está disponible.
+                    Abre la configuración lateral y usa
+                    <b>(Re)indexar manuales PDF</b>.
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
+
         else:
+
             st.markdown(
-                '<div class="op-status-ok">● Base de conocimiento lista para consultas.</div>',
+                """
+                <div class="op-status-ok">
+                    ● Base de conocimiento lista para consultas.
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
 
         for msg in st.session_state.messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
 
-        pregunta_pendiente = st.session_state.pop("pending_question", None)
-        pregunta = pregunta_pendiente or st.chat_input(
-            "Escribe el problema o la duda del cliente/agente..."
+            with st.chat_message(
+                msg["role"]
+            ):
+                st.markdown(
+                    msg["content"]
+                )
+
+        pregunta_pendiente = (
+            st.session_state.pop(
+                "pending_question",
+                None,
+            )
+        )
+
+        pregunta = (
+            pregunta_pendiente
+            or st.chat_input(
+                "Escribe el problema o la duda "
+                "del cliente/agente..."
+            )
         )
 
         if pregunta:
-            st.session_state.messages.append({"role": "user", "content": pregunta})
-            with st.chat_message("user"):
-                st.markdown(pregunta)
-
-            with st.chat_message("assistant"):
-                if not index_exists():
-                    respuesta_txt = (
-                        "Aún no hay manuales indexados. Abre la configuración lateral y pulsa "
-                        "**(Re)indexar manuales PDF**."
-                    )
-                    st.markdown(respuesta_txt)
-                else:
-                    try:
-                        with st.spinner("Buscando en los manuales..."):
-                            resultado = _resolver_pregunta(pregunta, top_k)
-                            respuesta_txt = resultado["respuesta"]
-
-                        st.markdown(respuesta_txt)
-                        _mostrar_fuentes(resultado["fragmentos"])
-                    except Exception as exc:
-                        respuesta_txt = (
-                            "No fue posible completar la consulta en este momento. "
-                            "La interfaz sigue disponible; revisa la conexión del modelo y vuelve a intentar."
-                        )
-                        st.error(respuesta_txt)
-                        with st.expander("Detalle técnico"):
-                            st.code(str(exc))
 
             st.session_state.messages.append(
-                {"role": "assistant", "content": respuesta_txt}
+                {
+                    "role": "user",
+                    "content": pregunta,
+                }
             )
+
+            with st.chat_message("user"):
+                st.markdown(
+                    pregunta
+                )
+
+            with st.chat_message("assistant"):
+
+                if not indice_chat:
+
+                    respuesta_txt = (
+                        "Aún no hay manuales indexados. "
+                        "Abre la configuración lateral y pulsa "
+                        "**(Re)indexar manuales PDF**."
+                    )
+
+                    st.markdown(
+                        respuesta_txt
+                    )
+
+                else:
+
+                    try:
+
+                        with st.spinner(
+                            "Buscando en los manuales..."
+                        ):
+
+                            resultado = (
+                                _resolver_pregunta(
+                                    pregunta,
+                                    top_k,
+                                )
+                            )
+
+                        if resultado is None:
+
+                            respuesta_txt = (
+                                "No se encontró un índice "
+                                "vectorial disponible."
+                            )
+
+                            st.warning(
+                                respuesta_txt
+                            )
+
+                        else:
+
+                            respuesta_txt = (
+                                resultado["respuesta"]
+                            )
+
+                            st.markdown(
+                                respuesta_txt
+                            )
+
+                            _mostrar_fuentes(
+                                resultado["fragmentos"]
+                            )
+
+                    except Exception as exc:
+
+                        print(
+                            f"ERROR ejecutando RAG: "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+
+                        respuesta_txt = (
+                            "No fue posible completar la consulta "
+                            "en este momento. La interfaz sigue "
+                            "disponible; revisa la conexión del "
+                            "modelo y vuelve a intentar."
+                        )
+
+                        st.error(
+                            respuesta_txt
+                        )
+
+                        with st.expander(
+                            "Detalle técnico"
+                        ):
+                            st.code(
+                                str(exc)
+                            )
+
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": respuesta_txt,
+                }
+            )
+
+
+print("20 - app.py terminó de renderizar")
