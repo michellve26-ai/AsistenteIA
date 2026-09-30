@@ -2,12 +2,9 @@ langchain-core
 langchain-community
 langchain-text-splitters
 langchain-chroma
-langchain-huggingface
 langchain-groq
-sentence-transformers
 chromadb
+fastembed
 pypdf
 python-dotenv
 streamlit
-fastapi
-uvicorn[standard]
