@@ -30,7 +30,14 @@ jobs:
       - name: Instalar dependencias
         run: |
           python -m pip install -r requirements.txt
-          python -m pip install ragas==0.2.15 datasets pandas
+          python -m pip install --force-reinstall \
+            "langchain-community==0.3.27" \
+            "langchain-core==0.3.72" \
+            "langchain==0.3.27" \
+            "ragas==0.2.15" \
+            "datasets>=3,<4" \
+            pandas
+          python -m pip check
 
       - name: Comprobar credenciales
         run: |
@@ -38,6 +45,7 @@ jobs:
             echo "ERROR: Falta GROQ_API_KEY"
             exit 1
           fi
+          echo "Credencial Groq configurada."
 
       - name: Reconstruir indice ChromaDB
         run: |
@@ -45,17 +53,23 @@ jobs:
           from src.ingest import load_pdfs, split_documents
           from src.vectorstore import get_embeddings, build_vectorstore
 
+          print("Cargando documentos PDF...", flush=True)
           documentos = load_pdfs()
+
+          print("Generando fragmentos...", flush=True)
           fragmentos = split_documents(documentos)
+
+          print("Inicializando embeddings...", flush=True)
           embeddings = get_embeddings()
 
+          print("Construyendo indice vectorial...", flush=True)
           build_vectorstore(
               fragmentos,
               embeddings,
               rebuild=True,
           )
 
-          print("Indice creado correctamente")
+          print("Indice ChromaDB creado correctamente.", flush=True)
           PY
 
       - name: Ejecutar evaluacion Ragas
