@@ -13,6 +13,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
+import instructor
 from ragas.embeddings.base import BaseRagasEmbedding
 from ragas.llms import llm_factory
 from ragas.metrics.collections import (
@@ -34,7 +35,7 @@ NO_ENCONTRADO = (
 # Numero maximo de operaciones (generaciones O metricas) por ejecucion.
 MAX_OPERATIONS = int(os.getenv("RAGAS_MAX_OPERATIONS", "5"))
 JUDGE_MODEL = os.getenv("RAGAS_JUDGE_MODEL", config.GROQ_MODEL)
-MAX_JSON_RETRIES = 2
+JUDGE_MODE = os.getenv("RAGAS_JUDGE_MODE", "MD_JSON").strip().upper()
 PAUSE_SECONDS = float(os.getenv("RAGAS_PAUSE_SECONDS", "15"))
 RETRY_JSON_ERRORS = os.getenv("RAGAS_RETRY_JSON_ERRORS", "false").lower() == "true"
 ERRORS_PATH = OUTPUT_DIR / "errores_json_ultima_ejecucion.json"
@@ -164,8 +165,15 @@ async def main():
         api_key=os.environ["GROQ_API_KEY"],
         base_url="https://api.groq.com/openai/v1", timeout=90, max_retries=0,
     )
-    judge = llm_factory(JUDGE_MODEL, provider="openai", client=client)
-    print(f"[RAGAS] Modelo evaluador: {JUDGE_MODEL}", flush=True)
+    try:
+        instructor_mode = getattr(instructor.Mode, JUDGE_MODE)
+    except AttributeError as exc:
+        raise ValueError(f"RAGAS_JUDGE_MODE no soportado: {JUDGE_MODE}") from exc
+    judge = llm_factory(
+        JUDGE_MODEL, provider="openai", client=client,
+        mode=instructor_mode,
+    )
+    print(f"[RAGAS] Modelo evaluador: {JUDGE_MODEL}; modo: {JUDGE_MODE}", flush=True)
     metrics = {
         "faithfulness": Faithfulness(llm=judge),
         "answer_relevancy": AnswerRelevancy(
@@ -180,10 +188,11 @@ async def main():
     if not isinstance(run_failures, list):
         raise ValueError("El archivo de errores JSON debe contener una lista")
     skip_json = {
-        (r.get("top_k"), r.get("id"), r.get("metrica"))
+        (r.get("top_k"), r.get("id"), r.get("metrica"), r.get("modo", "JSON"))
         for r in run_failures
         if r.get("error") == "json_validate_failed"
         and r.get("evaluador") == JUDGE_MODEL
+        and r.get("modo", "JSON") == JUDGE_MODE
     }
     print(
         f"[REANUDAR] Errores JSON previos del evaluador actual: {len(skip_json)}; "
@@ -241,7 +250,7 @@ async def main():
                                 break
                             if record.get(name) is not None:
                                 continue
-                            key = (k, row["id"], name)
+                            key = (k, row["id"], name, JUDGE_MODE)
                             if key in skip_json and not RETRY_JSON_ERRORS:
                                 print(
                                     f"[OMITIR JSON] k={k} {row['id']} {name}: "
@@ -263,7 +272,7 @@ async def main():
                                     failure = {
                                         "top_k": k, "id": row["id"], "metrica": name,
                                         "error": "json_validate_failed",
-                                        "evaluador": JUDGE_MODEL,
+                                        "evaluador": JUDGE_MODEL, "modo": JUDGE_MODE,
                                     }
                                     if key not in skip_json:
                                         run_failures.append(failure)
@@ -277,7 +286,7 @@ async def main():
                             if key in skip_json:
                                 run_failures = [
                                     e for e in run_failures
-                                    if (e.get("top_k"), e.get("id"), e.get("metrica")) != key
+                                    if (e.get("top_k"), e.get("id"), e.get("metrica"), e.get("modo", "JSON")) != key
                                     or e.get("evaluador") != JUDGE_MODEL
                                 ]
                                 skip_json.discard(key)
