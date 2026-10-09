@@ -1,42 +1,101 @@
+
 """
 Configuración central del asistente RAG de soporte técnico.
-Todos los parámetros ajustables del sistema viven aquí.
+
+Contiene los parámetros utilizados para:
+- Generación de respuestas con Groq.
+- Embeddings locales con FastEmbed.
+- Procesamiento de documentos.
+- Almacenamiento vectorial con ChromaDB.
+- Recuperación de información.
+- Personalización del asistente.
 """
 
 import os
+
 from dotenv import load_dotenv
+
 
 load_dotenv()
 
-# --- Groq ---
+
+# ---------------------------------------------------------
+# MODELO DE LENGUAJE - GROQ
+# ---------------------------------------------------------
+
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+GROQ_MODEL = os.getenv(
+    "GROQ_MODEL",
+    "openai/gpt-oss-120b",
+)
+
 LLM_TEMPERATURE = 0.0
 
-# --- Embeddings ---
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-# --- Documentos ---
-PDF_DIR = os.getenv("PDF_DIR", "data/pdfs")
+# ---------------------------------------------------------
+# EMBEDDINGS - FASTEMBED
+# ---------------------------------------------------------
 
-# --- Chunking ---
+EMBEDDING_MODEL = (
+    "sentence-transformers/all-MiniLM-L6-v2"
+)
+
+
+# ---------------------------------------------------------
+# DOCUMENTOS
+# ---------------------------------------------------------
+
+PDF_DIR = os.getenv(
+    "PDF_DIR",
+    "data/pdfs",
+)
+
+
+# ---------------------------------------------------------
+# FRAGMENTACIÓN DE DOCUMENTOS
+# ---------------------------------------------------------
+
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 
-# --- Vector store (ChromaDB) ---
-PERSIST_DIR = os.getenv("PERSIST_DIR", "chroma_db_minilm_l6")
+
+# ---------------------------------------------------------
+# BASE VECTORIAL - CHROMADB
+# ---------------------------------------------------------
+
+PERSIST_DIR = os.getenv(
+    "PERSIST_DIR",
+    "chroma_db_minilm_l6",
+)
+
 COLLECTION_NAME = "manuales_soporte"
 
-# --- Recuperación ---
+
+# ---------------------------------------------------------
+# RECUPERACIÓN DE INFORMACIÓN
+# ---------------------------------------------------------
+
 TOP_K = 5
 
-# --- Personalización de la interfaz ---
+
+# ---------------------------------------------------------
+# PERSONALIZACIÓN DEL ASISTENTE
+# ---------------------------------------------------------
+
 ASSISTANT_NAME = "Asistente de Soporte Técnico"
-EMPRESA = "Finanzas Corp"
+
+EMPRESA = "OficinaPro.co"
+
+
+# ---------------------------------------------------------
+# VALIDACIÓN DE CONFIGURACIÓN
+# ---------------------------------------------------------
 
 if not GROQ_API_KEY:
     print(
-        "[!] GROQ_API_KEY no está definida. "
-        "Configura la variable en .env o en Render."
+        "[ADVERTENCIA] GROQ_API_KEY no está definida. "
+        "Configura la variable de entorno en GitHub Actions, "
+        "Render o en el archivo .env.",
+        flush=True,
     )
-
