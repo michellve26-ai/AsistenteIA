@@ -45,6 +45,10 @@ INTEGRATION_VERSION = "instructor_directo_v2_max_tokens"
 PAUSE_SECONDS = float(os.getenv("RAGAS_PAUSE_SECONDS", "15"))
 RETRY_JSON_ERRORS = os.getenv("RAGAS_RETRY_JSON_ERRORS", "false").lower() == "true"
 ERRORS_PATH = OUTPUT_DIR / "errores_json_ultima_ejecucion.json"
+# Filtro opcional para reevaluaciones dirigidas (no genera ni puntua otros IDs).
+ONLY_IDS = {x.strip() for x in os.getenv("RAGAS_ONLY_IDS", "").split(",") if x.strip()}
+ONLY_METRICS = {x.strip() for x in os.getenv("RAGAS_ONLY_METRICS", "").split(",") if x.strip()}
+
 
 
 class FastEmbedRagasAdapter(BaseRagasEmbedding):
@@ -166,6 +170,10 @@ async def main():
     if MAX_OPERATIONS <= 0:
         raise ValueError("RAGAS_MAX_OPERATIONS debe ser positivo")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    if ONLY_IDS and not ONLY_IDS.issubset({q["id"] for q in questions}):
+        raise ValueError(f"RAGAS_ONLY_IDS desconocidos: {ONLY_IDS - {q['id'] for q in questions}}")
+    if ONLY_METRICS and not ONLY_METRICS.issubset(set(METRIC_NAMES)):
+        raise ValueError(f"RAGAS_ONLY_METRICS invalidas: {ONLY_METRICS - set(METRIC_NAMES)}")
 
     embeddings = get_embeddings()
     store = load_vectorstore(embeddings)
@@ -224,6 +232,8 @@ async def main():
                 raise RuntimeError(f"respuestas_k{k} no coincide con el dataset actual")
             scores = read_scores(scores_path)
             saved_lookup = {r["id"]: r for r in rows}
+            if ONLY_IDS and len(rows) != len(questions):
+                raise RuntimeError("Modo dirigido requiere respuestas completas; no se regeneraran preguntas")
             try:
                 # Generar solo respuestas faltantes; respetar el mismo orden.
                 for item in questions[len(rows):]:
@@ -264,12 +274,16 @@ async def main():
                             break
                         if row["expected_behavior"] != "answer":
                             continue
+                        if ONLY_IDS and row["id"] not in ONLY_IDS:
+                            continue
                         record = scores.setdefault(
                             row["id"], {name: None for name in METRIC_NAMES}
                         )
                         for name in METRIC_NAMES:
                             if operations >= MAX_OPERATIONS:
                                 break
+                            if ONLY_METRICS and name not in ONLY_METRICS:
+                                continue
                             if record.get(name) is not None:
                                 continue
                             key = (k, row["id"], name, JUDGE_MODE)
@@ -362,6 +376,7 @@ async def main():
         and all(v["evaluadas"] == v["esperadas"] for v in item["metricas"].values())
         for k in K_VALUES
     )
+    print(f"[ESTADO] filtro ids={sorted(ONLY_IDS) if ONLY_IDS else 'todos'}; metricas={sorted(ONLY_METRICS) if ONLY_METRICS else 'todas'}", flush=True)
     print(f"[ESTADO] valores de k procesados={K_VALUES}", flush=True)
     print(
         f"[ESTADO] operaciones nuevas={operations}; "
