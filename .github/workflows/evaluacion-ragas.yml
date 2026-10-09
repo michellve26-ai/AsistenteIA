@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       resume_run_id:
-        description: "ID anterior con los 31 resultados validos de k=5"
+        description: "ID de la ejecucion con 46 resultados validos de k=5"
         required: true
         type: string
       max_operations:
@@ -12,9 +12,8 @@ on:
         required: true
         type: choice
         options:
-          - "100"
-          - "50"
-        default: "100"
+          - "2"
+        default: "2"
 
 permissions:
   contents: read
@@ -33,6 +32,9 @@ jobs:
       RAGAS_MAX_OPERATIONS: ${{ inputs.max_operations }}
       RAGAS_K_VALUES: "5"
       RAGAS_PAUSE_SECONDS: "75"
+      RAGAS_ONLY_IDS: "P08,P11"
+      RAGAS_ONLY_METRICS: "faithfulness"
+      RAGAS_JUDGE_MAX_TOKENS: "6144"
       RAGAS_MAX_RATE_RETRIES: "80"
       RAGAS_MAX_WAIT_SECONDS: "3600"
       RAGAS_RETRY_JSON_ERRORS: "true"
@@ -66,7 +68,7 @@ jobs:
           run-id: ${{ inputs.resume_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verificar que se recuperaron los 31 resultados
+      - name: Verificar que se recuperaron los 46 resultados
         run: |
           test -s evaluacion/resultados/respuestas_k5.json
           test -s evaluacion/resultados/metricas_k5.csv
@@ -76,8 +78,9 @@ jobs:
               data = list(csv.DictReader(f))
           total = sum(value not in ('', 'None', 'nan') for row in data for key, value in row.items() if key != 'id')
           print('Puntuaciones recuperadas:', total)
-          if total < 31:
-              raise RuntimeError('Se esperaban al menos 31 puntuaciones previas; revisar resume_run_id')
+          pending = [(row['id'], key) for row in data for key in ('faithfulness','answer_relevancy','context_precision','context_recall') if row[key] in ('', 'None', 'nan')]
+          if total != 46 or sorted(pending) != [('P08', 'faithfulness'), ('P11', 'faithfulness')]:
+              raise RuntimeError(f'Se esperaban 46 puntuaciones y dos pendientes P08/P11; total={total}, pendientes={pending}')
           PY2
 
       - name: Comprobar credenciales y evaluador
@@ -98,7 +101,7 @@ jobs:
           print('Fragmentos indexados:', store._collection.count(), flush=True)
           PY2
 
-      - name: Evaluar pendientes automaticamente
+      - name: Evaluar solo P08 y P11 Faithfulness
         run: python -m evaluacion.evaluate_rag
 
       - name: Guardar resultados parciales o completos
