@@ -1,24 +1,20 @@
-
 name: Evaluacion Ragas
 
 on:
   workflow_dispatch:
     inputs:
       resume_run_id:
-        description: "ID de ejecucion anterior con resultados"
-        required: false
+        description: "ID anterior con los 31 resultados validos de k=5"
+        required: true
         type: string
-        default: ""
       max_operations:
-        description: "Maximo de operaciones nuevas"
+        description: "Operaciones maximas en esta ejecucion"
         required: true
         type: choice
         options:
-          - "1"
-          - "2"
-          - "4"
-          - "6"
-        default: "1"
+          - "100"
+          - "50"
+        default: "100"
 
 permissions:
   contents: read
@@ -28,15 +24,18 @@ jobs:
   evaluar-rag:
     name: Evaluar asistente RAG
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
-
+    timeout-minutes: 300
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       RAGAS_JUDGE_MODEL: ${{ vars.RAGAS_JUDGE_MODEL }}
       PERSIST_DIR: chroma_db_minilm_l6
       PYTHONUNBUFFERED: "1"
       RAGAS_MAX_OPERATIONS: ${{ inputs.max_operations }}
-      RAGAS_PAUSE_SECONDS: "18"
+      RAGAS_K_VALUES: "5"
+      RAGAS_PAUSE_SECONDS: "75"
+      RAGAS_MAX_RATE_RETRIES: "80"
+      RAGAS_MAX_WAIT_SECONDS: "3600"
+      RAGAS_RETRY_JSON_ERRORS: "true"
 
     steps:
       - name: Descargar repositorio
@@ -54,14 +53,11 @@ jobs:
           python -m pip install \
             "ragas==0.4.3" \
             "langchain-community==0.4.1" \
-            "groq" \
-            "instructor" \
-            "pandas"
+            "groq" "instructor" "pandas"
           python -m pip check
           python -c "import ragas; print('Ragas OK')"
 
       - name: Recuperar resultados anteriores
-        if: ${{ inputs.resume_run_id != '' }}
         uses: actions/download-artifact@v4
         with:
           name: resultados-evaluacion-ragas
@@ -70,75 +66,40 @@ jobs:
           run-id: ${{ inputs.resume_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verificar datos recuperados
+      - name: Verificar que se recuperaron los 31 resultados
         run: |
-          mkdir -p evaluacion/resultados
-          find evaluacion/resultados -maxdepth 1 -type f -printf '%f\n'
+          test -s evaluacion/resultados/respuestas_k5.json
+          test -s evaluacion/resultados/metricas_k5.csv
+          python - <<'PY2'
+          import csv
+          with open('evaluacion/resultados/metricas_k5.csv', newline='', encoding='utf-8') as f:
+              data = list(csv.DictReader(f))
+          total = sum(value not in ('', 'None', 'nan') for row in data for key, value in row.items() if key != 'id')
+          print('Puntuaciones recuperadas:', total)
+          if total < 31:
+              raise RuntimeError('Se esperaban al menos 31 puntuaciones previas; revisar resume_run_id')
+          PY2
 
       - name: Comprobar credenciales y evaluador
         run: |
-          test -n "$GROQ_API_KEY" || {
-            echo "ERROR: Falta GROQ_API_KEY"
-            exit 1
-          }
-
-          test -n "$RAGAS_JUDGE_MODEL" || {
-            echo "ERROR: Falta RAGAS_JUDGE_MODEL"
-            exit 1
-          }
-
+          test -n "$GROQ_API_KEY" || (echo "Falta GROQ_API_KEY" && exit 1)
+          test -n "$RAGAS_JUDGE_MODEL" || (echo "Falta RAGAS_JUDGE_MODEL" && exit 1)
           echo "Modelo evaluador: $RAGAS_JUDGE_MODEL"
-
-          python - <<'PY'
-          import os
-          from groq import Groq
-
-          modelo = os.environ["RAGAS_JUDGE_MODEL"]
-          cliente = Groq(api_key=os.environ["GROQ_API_KEY"])
-          disponibles = {m.id for m in cliente.models.list().data}
-
-          if modelo not in disponibles:
-              raise RuntimeError(
-                  f"Modelo evaluador no disponible: {modelo}"
-              )
-
-          print("Modelo evaluador disponible", flush=True)
-          PY
 
       - name: Reconstruir indice ChromaDB
         run: |
-          python - <<'PY'
+          python - <<'PY2'
           from src.ingest import load_pdfs, split_documents
           from src.vectorstore import get_embeddings, build_vectorstore
+          chunks = split_documents(load_pdfs())
+          if not chunks:
+              raise RuntimeError('Corpus PDF vacio')
+          store = build_vectorstore(chunks, get_embeddings(), rebuild=True)
+          print('Fragmentos indexados:', store._collection.count(), flush=True)
+          PY2
 
-          documentos = load_pdfs()
-          fragmentos = split_documents(documentos)
-
-          if not fragmentos:
-              raise RuntimeError("Corpus PDF vacio")
-
-          embeddings = get_embeddings()
-
-          store = build_vectorstore(
-              fragmentos,
-              embeddings,
-              rebuild=True,
-          )
-
-          total = store._collection.count()
-
-          if total == 0:
-              raise RuntimeError("Indice vectorial vacio")
-
-          print(
-              f"Fragmentos indexados: {total}",
-              flush=True,
-          )
-          PY
-
-      - name: Evaluar lote reanudable
-        run: |
-          python -m evaluacion.evaluate_rag
+      - name: Evaluar pendientes automaticamente
+        run: python -m evaluacion.evaluate_rag
 
       - name: Guardar resultados parciales o completos
         if: always()
