@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 import instructor
 from ragas.embeddings.base import BaseRagasEmbedding
-from ragas.llms.base import InstructorLLM
+from ragas.llms.base import InstructorLLM, InstructorModelArgs
 from ragas.metrics.collections import (
     AnswerRelevancy, ContextPrecisionWithReference, ContextRecall, Faithfulness,
 )
@@ -36,6 +36,8 @@ NO_ENCONTRADO = (
 MAX_OPERATIONS = int(os.getenv("RAGAS_MAX_OPERATIONS", "5"))
 JUDGE_MODEL = os.getenv("RAGAS_JUDGE_MODEL", config.GROQ_MODEL)
 JUDGE_MODE = os.getenv("RAGAS_JUDGE_MODE", "MD_JSON").strip().upper()
+JUDGE_MAX_TOKENS = int(os.getenv("RAGAS_JUDGE_MAX_TOKENS", "4096"))
+INTEGRATION_VERSION = "instructor_directo_v2_max_tokens"
 PAUSE_SECONDS = float(os.getenv("RAGAS_PAUSE_SECONDS", "15"))
 RETRY_JSON_ERRORS = os.getenv("RAGAS_RETRY_JSON_ERRORS", "false").lower() == "true"
 ERRORS_PATH = OUTPUT_DIR / "errores_json_ultima_ejecucion.json"
@@ -116,7 +118,9 @@ def quota_delay_seconds(error):
 def is_json_error(error):
     msg = str(error).lower()
     return ("json_validate_failed" in msg or "failed to validate json" in msg or
-            "instructorretryexception" in type(error).__name__.lower())
+            "instructorretryexception" in type(error).__name__.lower() or
+            "incompleteoutputexception" in type(error).__name__.lower() or
+            "output is incomplete" in msg)
 
 
 def is_quota_error(error):
@@ -172,8 +176,11 @@ async def main():
     # Ragas 0.4.3 no acepta mode= en llm_factory: lo pasa a la API como argumento.
     # Envolver primero el cliente OpenAI con Instructor y luego entregarlo a Ragas.
     structured_client = instructor.from_openai(client, mode=instructor_mode)
-    judge = InstructorLLM(client=structured_client, model=JUDGE_MODEL, provider="openai")
-    print(f"[RAGAS] Modelo evaluador: {JUDGE_MODEL}; modo: {JUDGE_MODE}", flush=True)
+    judge = InstructorLLM(
+        client=structured_client, model=JUDGE_MODEL, provider="openai",
+        model_args=InstructorModelArgs(max_tokens=JUDGE_MAX_TOKENS),
+    )
+    print(f"[RAGAS] Modelo evaluador: {JUDGE_MODEL}; modo: {JUDGE_MODE}; max_tokens: {JUDGE_MAX_TOKENS}", flush=True)
     metrics = {
         "faithfulness": Faithfulness(llm=judge),
         "answer_relevancy": AnswerRelevancy(
@@ -193,7 +200,7 @@ async def main():
         if r.get("error") == "json_validate_failed"
         and r.get("evaluador") == JUDGE_MODEL
         and r.get("modo", "JSON") == JUDGE_MODE
-        and r.get("integracion") == "instructor_directo_v1"
+        and r.get("integracion") == INTEGRATION_VERSION
     }
     print(
         f"[REANUDAR] Errores JSON previos del evaluador actual: {len(skip_json)}; "
@@ -274,12 +281,12 @@ async def main():
                                         "top_k": k, "id": row["id"], "metrica": name,
                                         "error": "json_validate_failed",
                                         "evaluador": JUDGE_MODEL, "modo": JUDGE_MODE,
-                                        "integracion": "instructor_directo_v1",
+                                        "integracion": INTEGRATION_VERSION,
                                     }
                                     if key not in skip_json:
                                         run_failures.append(failure)
                                         skip_json.add(key)
-                                    print(f"[JSON] {row['id']} {name}: respuesta estructurada rechazada; sigue pendiente.", flush=True)
+                                    print(f"[FORMATO] {row['id']} {name}: {type(exc).__name__}; sigue pendiente y se conservan resultados.", flush=True)
                                     save_json(ERRORS_PATH, run_failures)
                                     await asyncio.sleep(PAUSE_SECONDS)
                                     continue
@@ -290,7 +297,7 @@ async def main():
                                     e for e in run_failures
                                     if (e.get("top_k"), e.get("id"), e.get("metrica"), e.get("modo", "JSON")) != key
                                     or e.get("evaluador") != JUDGE_MODEL
-                                    or e.get("integracion") != "instructor_directo_v1"
+                                    or e.get("integracion") != INTEGRATION_VERSION
                                 ]
                                 skip_json.discard(key)
                                 save_json(ERRORS_PATH, run_failures)
