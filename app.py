@@ -805,6 +805,7 @@ with content_col:
                                 prompt_template,
                                 pregunta,
                                 k=top_k,
+                                historial=st.session_state.messages[:-1],
                             )
 
                             respuesta_txt = resultado["respuesta"]
