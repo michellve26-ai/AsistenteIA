@@ -29,6 +29,11 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install "ragas==0.4.3" "groq" "instructor" "pandas"
           python -m pip check
+          
+      - name: Verificar version de Ragas
+        run: |
+          python -m pip show ragas
+          python -m pip check
 
       - name: Comprobar credenciales
         run: |
