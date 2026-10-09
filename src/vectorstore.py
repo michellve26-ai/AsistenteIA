@@ -25,9 +25,12 @@ def get_embeddings() -> FastEmbedEmbeddings:
         flush=True,
     )
 
-    try:
+      try:
         embeddings = FastEmbedEmbeddings(
-            model_name=config.EMBEDDING_MODEL
+            model_name=config.EMBEDDING_MODEL,
+            threads=1,
+            batch_size=1,
+            parallel=None,
         )
 
         duracion = time.perf_counter() - inicio
