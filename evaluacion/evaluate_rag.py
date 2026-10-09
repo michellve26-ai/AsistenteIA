@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 import instructor
 from ragas.embeddings.base import BaseRagasEmbedding
-from ragas.llms import llm_factory
+from ragas.llms.base import InstructorLLM
 from ragas.metrics.collections import (
     AnswerRelevancy, ContextPrecisionWithReference, ContextRecall, Faithfulness,
 )
@@ -169,10 +169,10 @@ async def main():
         instructor_mode = getattr(instructor.Mode, JUDGE_MODE)
     except AttributeError as exc:
         raise ValueError(f"RAGAS_JUDGE_MODE no soportado: {JUDGE_MODE}") from exc
-    judge = llm_factory(
-        JUDGE_MODEL, provider="openai", client=client,
-        mode=instructor_mode,
-    )
+    # Ragas 0.4.3 no acepta mode= en llm_factory: lo pasa a la API como argumento.
+    # Envolver primero el cliente OpenAI con Instructor y luego entregarlo a Ragas.
+    structured_client = instructor.from_openai(client, mode=instructor_mode)
+    judge = InstructorLLM(client=structured_client, model=JUDGE_MODEL, provider="openai")
     print(f"[RAGAS] Modelo evaluador: {JUDGE_MODEL}; modo: {JUDGE_MODE}", flush=True)
     metrics = {
         "faithfulness": Faithfulness(llm=judge),
@@ -193,6 +193,7 @@ async def main():
         if r.get("error") == "json_validate_failed"
         and r.get("evaluador") == JUDGE_MODEL
         and r.get("modo", "JSON") == JUDGE_MODE
+        and r.get("integracion") == "instructor_directo_v1"
     }
     print(
         f"[REANUDAR] Errores JSON previos del evaluador actual: {len(skip_json)}; "
@@ -273,6 +274,7 @@ async def main():
                                         "top_k": k, "id": row["id"], "metrica": name,
                                         "error": "json_validate_failed",
                                         "evaluador": JUDGE_MODEL, "modo": JUDGE_MODE,
+                                        "integracion": "instructor_directo_v1",
                                     }
                                     if key not in skip_json:
                                         run_failures.append(failure)
@@ -288,6 +290,7 @@ async def main():
                                     e for e in run_failures
                                     if (e.get("top_k"), e.get("id"), e.get("metrica"), e.get("modo", "JSON")) != key
                                     or e.get("evaluador") != JUDGE_MODEL
+                                    or e.get("integracion") != "instructor_directo_v1"
                                 ]
                                 skip_json.discard(key)
                                 save_json(ERRORS_PATH, run_failures)
