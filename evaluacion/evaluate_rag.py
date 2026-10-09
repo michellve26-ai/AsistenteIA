@@ -36,6 +36,8 @@ MAX_OPERATIONS = int(os.getenv("RAGAS_MAX_OPERATIONS", "5"))
 JUDGE_MODEL = os.getenv("RAGAS_JUDGE_MODEL", config.GROQ_MODEL)
 MAX_JSON_RETRIES = 2
 PAUSE_SECONDS = float(os.getenv("RAGAS_PAUSE_SECONDS", "15"))
+RETRY_JSON_ERRORS = os.getenv("RAGAS_RETRY_JSON_ERRORS", "false").lower() == "true"
+ERRORS_PATH = OUTPUT_DIR / "errores_json_ultima_ejecucion.json"
 
 
 class FastEmbedRagasAdapter(BaseRagasEmbedding):
@@ -174,7 +176,19 @@ async def main():
     }
     operations = 0
     blocked = False
-    run_failures = []
+    run_failures = read_json(ERRORS_PATH, [])
+    if not isinstance(run_failures, list):
+        raise ValueError("El archivo de errores JSON debe contener una lista")
+    skip_json = {
+        (r.get("top_k"), r.get("id"), r.get("metrica"))
+        for r in run_failures
+        if r.get("error") == "json_validate_failed"
+        and r.get("evaluador") == JUDGE_MODEL
+    }
+    print(
+        f"[REANUDAR] Errores JSON previos del evaluador actual: {len(skip_json)}; "
+        f"reintentar={RETRY_JSON_ERRORS}", flush=True,
+    )
     try:
         for k in (5, 7):
             if blocked or operations >= MAX_OPERATIONS:
@@ -227,6 +241,13 @@ async def main():
                                 break
                             if record.get(name) is not None:
                                 continue
+                            key = (k, row["id"], name)
+                            if key in skip_json and not RETRY_JSON_ERRORS:
+                                print(
+                                    f"[OMITIR JSON] k={k} {row['id']} {name}: "
+                                    "ya fallo con este evaluador; sigue pendiente.", flush=True,
+                                )
+                                continue
                             print(f"[k={k}] {row['id']} {name}", flush=True)
                             operations += 1  # Contar también las operaciones que fallan.
                             try:
@@ -244,13 +265,23 @@ async def main():
                                         "error": "json_validate_failed",
                                         "evaluador": JUDGE_MODEL,
                                     }
-                                    run_failures.append(failure)
+                                    if key not in skip_json:
+                                        run_failures.append(failure)
+                                        skip_json.add(key)
                                     print(f"[JSON] {row['id']} {name}: respuesta estructurada rechazada; sigue pendiente.", flush=True)
-                                    save_json(OUTPUT_DIR / "errores_json_ultima_ejecucion.json", run_failures)
+                                    save_json(ERRORS_PATH, run_failures)
                                     await asyncio.sleep(PAUSE_SECONDS)
                                     continue
                                 raise
                             record[name] = val
+                            if key in skip_json:
+                                run_failures = [
+                                    e for e in run_failures
+                                    if (e.get("top_k"), e.get("id"), e.get("metrica")) != key
+                                    or e.get("evaluador") != JUDGE_MODEL
+                                ]
+                                skip_json.discard(key)
+                                save_json(ERRORS_PATH, run_failures)
                             write_scores(scores_path, expected_ids, scores)
                             print(f"[k={k}] {row['id']} {name}={val:.4f}", flush=True)
                             await asyncio.sleep(PAUSE_SECONDS)
@@ -279,7 +310,10 @@ async def main():
         and all(v["evaluadas"] == v["esperadas"] for v in item["metricas"].values())
         for item in comparisons
     )
-    print(f"[ESTADO] operaciones nuevas={operations}; evaluacion_completa={complete}", flush=True)
+    print(
+        f"[ESTADO] operaciones nuevas={operations}; "
+        f"bloqueos_json={len(skip_json)}; evaluacion_completa={complete}", flush=True,
+    )
     if not complete:
         print("[PENDIENTE] Descargar el artefacto y reanudar con su run ID en GitHub Actions.", flush=True)
 
