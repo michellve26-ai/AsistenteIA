@@ -41,7 +41,8 @@ MAX_WAIT_SECONDS = float(os.getenv("RAGAS_MAX_WAIT_SECONDS", "3600"))
 JUDGE_MODEL = os.getenv("RAGAS_JUDGE_MODEL", config.GROQ_MODEL)
 JUDGE_MODE = os.getenv("RAGAS_JUDGE_MODE", "MD_JSON").strip().upper()
 JUDGE_MAX_TOKENS = int(os.getenv("RAGAS_JUDGE_MAX_TOKENS", "4096"))
-INTEGRATION_VERSION = "instructor_directo_v2_max_tokens"
+INTEGRATION_VERSION = "instructor_groq_low_reasoning_v1"
+REASONING_EFFORT = os.getenv("RAGAS_REASONING_EFFORT", "low").lower()
 PAUSE_SECONDS = float(os.getenv("RAGAS_PAUSE_SECONDS", "15"))
 RETRY_JSON_ERRORS = os.getenv("RAGAS_RETRY_JSON_ERRORS", "false").lower() == "true"
 ERRORS_PATH = OUTPUT_DIR / "errores_json_ultima_ejecucion.json"
@@ -49,6 +50,21 @@ ERRORS_PATH = OUTPUT_DIR / "errores_json_ultima_ejecucion.json"
 ONLY_IDS = {x.strip() for x in os.getenv("RAGAS_ONLY_IDS", "").split(",") if x.strip()}
 ONLY_METRICS = {x.strip() for x in os.getenv("RAGAS_ONLY_METRICS", "").split(",") if x.strip()}
 
+
+
+class GroqInstructorLLM(InstructorLLM):
+    """Inject supported Groq reasoning settings in Ragas 0.4.3.
+
+    Use provider-specific mapping rather than passing mode or other
+    arguments through llm_factory (which breaks in 0.4.3).
+    """
+
+    def _map_openai_params(self):
+        args = super()._map_openai_params()
+        if self.model.startswith("openai/gpt-oss-"):
+            args["reasoning_effort"] = REASONING_EFFORT
+            args["reasoning_format"] = "hidden"
+        return args
 
 
 class FastEmbedRagasAdapter(BaseRagasEmbedding):
@@ -190,11 +206,11 @@ async def main():
     # Ragas 0.4.3 no acepta mode= en llm_factory: lo pasa a la API como argumento.
     # Envolver primero el cliente OpenAI con Instructor y luego entregarlo a Ragas.
     structured_client = instructor.from_openai(client, mode=instructor_mode)
-    judge = InstructorLLM(
+    judge = GroqInstructorLLM(
         client=structured_client, model=JUDGE_MODEL, provider="openai",
         model_args=InstructorModelArgs(max_tokens=JUDGE_MAX_TOKENS),
     )
-    print(f"[RAGAS] Modelo evaluador: {JUDGE_MODEL}; modo: {JUDGE_MODE}; max_tokens: {JUDGE_MAX_TOKENS}", flush=True)
+    print(f"[RAGAS] Modelo evaluador: {JUDGE_MODEL}; modo: {JUDGE_MODE}; max_tokens: {JUDGE_MAX_TOKENS}; razonamiento: {REASONING_EFFORT}", flush=True)
     metrics = {
         "faithfulness": Faithfulness(llm=judge),
         "answer_relevancy": AnswerRelevancy(
