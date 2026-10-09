@@ -14,7 +14,7 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 LLM_TEMPERATURE = 0.0
 
 # --- Embeddings ---
-EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 # --- Documentos ---
 PDF_DIR = os.getenv("PDF_DIR", "data/pdfs")
@@ -24,7 +24,7 @@ CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 
 # --- Vector store (ChromaDB) ---
-PERSIST_DIR = os.getenv("PERSIST_DIR", "chroma_db")
+PERSIST_DIR = os.getenv("PERSIST_DIR", "chroma_db_minilm_l6")
 COLLECTION_NAME = "manuales_soporte"
 
 # --- Recuperación ---
