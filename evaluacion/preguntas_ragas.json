@@ -1,0 +1,137 @@
+[
+  {
+    "id": "P01",
+    "user_input": "¿Cómo creo una factura de venta con crédito a un día en OficinaPro?",
+    "reference": "Ve a Crear > Factura de venta; selecciona cliente, punto de venta, entrega y lista de precios; agrega productos, revisa impuestos y descuentos, configura el plazo de crédito/vencimiento y pulsa Facturar. El nombre exacto del selector para un día no está documentado.",
+    "expected_behavior": "answer",
+    "source_document": "BaseDeConocimiento.pdf",
+    "source_page": 6,
+    "source_section": "FAC-001"
+  },
+  {
+    "id": "P02",
+    "user_input": "¿Qué ocurre con el saldo cuando creo una factura a crédito?",
+    "reference": "La factura deja una cuenta por cobrar abierta, cuyo vencimiento depende del plazo configurado.",
+    "expected_behavior": "answer",
+    "source_document": "BaseDeConocimiento.pdf",
+    "source_page": 6,
+    "source_section": "FAC-001"
+  },
+  {
+    "id": "P03",
+    "user_input": "¿Cómo agrego retenciones al crear una factura de venta?",
+    "reference": "En Crear > Factura de venta selecciona cliente, condiciones y productos, revisa impuestos y descuentos, completa las retenciones, revisa totales y pulsa Facturar o Facturar y agregar pago. Depende de los permisos y configuración.",
+    "expected_behavior": "answer",
+    "source_document": "BaseDeConocimiento.pdf",
+    "source_page": 7,
+    "source_section": "FAC-002"
+  },
+  {
+    "id": "P04",
+    "user_input": "Si una factura de 500000 recibe un abono de 200000, ¿queda abierta o cerrada?",
+    "reference": "Permanece abierta porque resta un saldo pendiente de 300000. Se cierra cuando se cubre el saldo completo.",
+    "expected_behavior": "answer",
+    "source_document": "BaseDeConocimiento.pdf",
+    "source_page": 10,
+    "source_section": "FAC-003"
+  },
+  {
+    "id": "P05",
+    "user_input": "¿Qué indica que una factura aparezca como cerrada?",
+    "reference": "Que el saldo por cobrar quedó cubierto y no hay saldo pendiente.",
+    "expected_behavior": "answer",
+    "source_document": "BaseDeConocimiento.pdf",
+    "source_page": 10,
+    "source_section": "FAC-003"
+  },
+  {
+    "id": "P06",
+    "user_input": "¿Cómo puedo reversar una nota crédito que ya cerré?",
+    "reference": "Ingresa a Ingresos > Notas Crédito, abre la nota y comprueba si está disponible la acción Reversar. Úsala solo con permisos y estado adecuados; si no aparece, escala el caso. No borres la nota ni ajustes inventario manualmente.",
+    "expected_behavior": "answer",
+    "source_document": "BaseDeConocimiento.pdf",
+    "source_page": 11,
+    "source_section": "FAC-004"
+  },
+  {
+    "id": "P07",
+    "user_input": "¿Debo crear otra factura para reversar una nota crédito cerrada?",
+    "reference": "No es recomendable crear otra factura únicamente para reversarla. Debe revisarse la opción Reversar y distinguir entre reversión de la nota y nueva aplicación de factura.",
+    "expected_behavior": "answer",
+    "source_document": "BaseDeConocimiento.pdf",
+    "source_page": 11,
+    "source_section": "FAC-004"
+  },
+  {
+    "id": "P08",
+    "user_input": "¿Cómo genero una cotización para un cliente?",
+    "reference": "Ingresa a Ingresos > Cotizaciones o Crear > Cotización, selecciona cliente, agrega productos y cantidades, revisa precios e impuestos y guarda. Las acciones disponibles dependen de permisos y configuración.",
+    "expected_behavior": "answer",
+    "source_document": "BaseDeConocimiento.pdf",
+    "source_page": 12,
+    "source_section": "FAC-005"
+  },
+  {
+    "id": "P09",
+    "user_input": "¿Dónde puedo revisar una factura electrónica que ya emití?",
+    "reference": "Ve a Ingresos > Facturación, busca y abre la factura. Revisa el detalle, estado electrónico y, si está disponible, descarga su representación. Los botones varían según la configuración.",
+    "expected_behavior": "answer",
+    "source_document": "BaseDeConocimiento.pdf",
+    "source_page": 14,
+    "source_section": "FAC-007"
+  },
+  {
+    "id": "P10",
+    "user_input": "¿Cómo registro una venta POS a nombre de un cliente y no como consumidor final?",
+    "reference": "Ingresa a Ingresos > Facturación POS o Crear > Factura POS, selecciona el cliente, agrega productos y cantidades, completa cobro y método de pago, verifica el tercero y guarda.",
+    "expected_behavior": "answer",
+    "source_document": "BaseDeConocimiento.pdf",
+    "source_page": 16,
+    "source_section": "POS-001"
+  },
+  {
+    "id": "P11",
+    "user_input": "¿Cómo edito la información de un cliente existente?",
+    "reference": "Ve a Usuarios > Clientes y Proveedores, busca y selecciona el cliente, entra a su ficha, modifica los campos disponibles y guarda; la edición depende de permisos.",
+    "expected_behavior": "answer",
+    "source_document": "BaseDeConocimiento.pdf",
+    "source_page": 19,
+    "source_section": "CLI-001"
+  },
+  {
+    "id": "P12",
+    "user_input": "¿Dónde consulto el saldo pendiente y las facturas de un cliente?",
+    "reference": "En Usuarios > Clientes y Proveedores selecciona el cliente y entra en cuenta/saldo. Alternativamente, usa Reportes > Cartera con filtros de cliente, fechas y oficina.",
+    "expected_behavior": "answer",
+    "source_document": "BaseDeConocimiento.pdf",
+    "source_page": 20,
+    "source_section": "CAR-001"
+  },
+  {
+    "id": "P13",
+    "user_input": "¿Qué precio tendrá la acción de Tesla en diciembre de 2030?",
+    "reference": "No encontré esto en los manuales. Te recomiendo escalar el caso al equipo correspondiente.",
+    "expected_behavior": "abstain",
+    "source_document": null,
+    "source_page": null,
+    "source_section": null
+  },
+  {
+    "id": "P14",
+    "user_input": "¿Cuál fue el resultado del partido de fútbol de anoche?",
+    "reference": "No encontré esto en los manuales. Te recomiendo escalar el caso al equipo correspondiente.",
+    "expected_behavior": "abstain",
+    "source_document": null,
+    "source_page": null,
+    "source_section": null
+  },
+  {
+    "id": "P15",
+    "user_input": "¿Cuál es la contraseña actual del administrador de OficinaPro?",
+    "reference": "No encontré esto en los manuales. Te recomiendo escalar el caso al equipo correspondiente.",
+    "expected_behavior": "abstain",
+    "source_document": null,
+    "source_page": null,
+    "source_section": null
+  }
+]
