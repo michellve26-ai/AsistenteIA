@@ -1,22 +1,24 @@
+
 name: Evaluacion Ragas
 
 on:
   workflow_dispatch:
     inputs:
       resume_run_id:
-        description: "ID de ejecucion anterior con artefacto resultados-evaluacion-ragas (vacio = comenzar sin datos)"
+        description: "ID de ejecucion anterior con resultados"
         required: false
         type: string
-        default: "37963089328"
+        default: ""
       max_operations:
-        description: "Maximo de generaciones o metricas nuevas esta vez"
+        description: "Maximo de operaciones nuevas"
         required: true
         type: choice
         options:
-          - "4"
+          - "1"
           - "2"
+          - "4"
           - "6"
-        default: "4"
+        default: "1"
 
 permissions:
   contents: read
@@ -27,12 +29,15 @@ jobs:
     name: Evaluar asistente RAG
     runs-on: ubuntu-24.04
     timeout-minutes: 55
+
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      RAGAS_JUDGE_MODEL: ${{ vars.RAGAS_JUDGE_MODEL }}
       PERSIST_DIR: chroma_db_minilm_l6
       PYTHONUNBUFFERED: "1"
       RAGAS_MAX_OPERATIONS: ${{ inputs.max_operations }}
       RAGAS_PAUSE_SECONDS: "18"
+
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
@@ -49,7 +54,9 @@ jobs:
           python -m pip install \
             "ragas==0.4.3" \
             "langchain-community==0.4.1" \
-            "groq" "instructor" "pandas"
+            "groq" \
+            "instructor" \
+            "pandas"
           python -m pip check
           python -c "import ragas; print('Ragas OK')"
 
@@ -68,24 +75,70 @@ jobs:
           mkdir -p evaluacion/resultados
           find evaluacion/resultados -maxdepth 1 -type f -printf '%f\n'
 
-      - name: Comprobar credenciales
+      - name: Comprobar credenciales y evaluador
         run: |
-          test -n "$GROQ_API_KEY" || (echo 'Falta GROQ_API_KEY' && exit 1)
+          test -n "$GROQ_API_KEY" || {
+            echo "ERROR: Falta GROQ_API_KEY"
+            exit 1
+          }
+
+          test -n "$RAGAS_JUDGE_MODEL" || {
+            echo "ERROR: Falta RAGAS_JUDGE_MODEL"
+            exit 1
+          }
+
+          echo "Modelo evaluador: $RAGAS_JUDGE_MODEL"
+
+          python - <<'PY'
+          import os
+          from groq import Groq
+
+          modelo = os.environ["RAGAS_JUDGE_MODEL"]
+          cliente = Groq(api_key=os.environ["GROQ_API_KEY"])
+          disponibles = {m.id for m in cliente.models.list().data}
+
+          if modelo not in disponibles:
+              raise RuntimeError(
+                  f"Modelo evaluador no disponible: {modelo}"
+              )
+
+          print("Modelo evaluador disponible", flush=True)
+          PY
 
       - name: Reconstruir indice ChromaDB
         run: |
           python - <<'PY'
           from src.ingest import load_pdfs, split_documents
           from src.vectorstore import get_embeddings, build_vectorstore
-          chunks = split_documents(load_pdfs())
-          if not chunks:
-              raise RuntimeError('Corpus PDF vacio')
-          store = build_vectorstore(chunks, get_embeddings(), rebuild=True)
-          print('Fragmentos indexados:', store._collection.count(), flush=True)
+
+          documentos = load_pdfs()
+          fragmentos = split_documents(documentos)
+
+          if not fragmentos:
+              raise RuntimeError("Corpus PDF vacio")
+
+          embeddings = get_embeddings()
+
+          store = build_vectorstore(
+              fragmentos,
+              embeddings,
+              rebuild=True,
+          )
+
+          total = store._collection.count()
+
+          if total == 0:
+              raise RuntimeError("Indice vectorial vacio")
+
+          print(
+              f"Fragmentos indexados: {total}",
+              flush=True,
+          )
           PY
 
       - name: Evaluar lote reanudable
-        run: python -m evaluacion.evaluate_rag
+        run: |
+          python -m evaluacion.evaluate_rag
 
       - name: Guardar resultados parciales o completos
         if: always()
