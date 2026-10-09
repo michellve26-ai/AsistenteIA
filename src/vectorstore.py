@@ -7,6 +7,7 @@ el consumo de memoria en entornos con recursos limitados como Render.
 
 import os
 import shutil
+import time
 
 from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_chroma import Chroma
@@ -14,16 +15,35 @@ from langchain_chroma import Chroma
 from . import config
 
 
-def get_embeddings() -> FastEmbedEmbeddings:
-    """
-    Crea el modelo de embeddings utilizando FastEmbed.
 
-    FastEmbed usa ONNX en CPU y evita cargar PyTorch y CUDA,
-    reduciendo considerablemente el consumo de memoria.
-    """
-    return FastEmbedEmbeddings(
-        model_name=config.EMBEDDING_MODEL
+def get_embeddings() -> FastEmbedEmbeddings:
+    """Inicializa el modelo de embeddings y registra su tiempo de carga."""
+    inicio = time.perf_counter()
+
+    print(
+        f"[EMBEDDINGS] Iniciando modelo: {config.EMBEDDING_MODEL}",
+        flush=True,
     )
+
+    try:
+        embeddings = FastEmbedEmbeddings(
+            model_name=config.EMBEDDING_MODEL
+        )
+
+        duracion = time.perf_counter() - inicio
+        print(
+            f"[EMBEDDINGS] Modelo cargado en {duracion:.2f} segundos",
+            flush=True,
+        )
+
+        return embeddings
+
+    except Exception as error:
+        print(
+            f"[EMBEDDINGS] Error durante la carga: {error}",
+            flush=True,
+        )
+        raise
 
 
 def build_vectorstore(
