@@ -33,6 +33,8 @@ NO_ENCONTRADO = (
 )
 # Numero maximo de operaciones (generaciones O metricas) por ejecucion.
 MAX_OPERATIONS = int(os.getenv("RAGAS_MAX_OPERATIONS", "5"))
+JUDGE_MODEL = os.getenv("RAGAS_JUDGE_MODEL", config.GROQ_MODEL)
+MAX_JSON_RETRIES = 2
 PAUSE_SECONDS = float(os.getenv("RAGAS_PAUSE_SECONDS", "15"))
 
 
@@ -108,6 +110,12 @@ def quota_delay_seconds(error):
     return None
 
 
+def is_json_error(error):
+    msg = str(error).lower()
+    return ("json_validate_failed" in msg or "failed to validate json" in msg or
+            "instructorretryexception" in type(error).__name__.lower())
+
+
 def is_quota_error(error):
     return getattr(error, "status_code", None) == 429 or "429" in str(error) and "rate" in str(error).lower()
 
@@ -154,7 +162,8 @@ async def main():
         api_key=os.environ["GROQ_API_KEY"],
         base_url="https://api.groq.com/openai/v1", timeout=90, max_retries=0,
     )
-    judge = llm_factory(config.GROQ_MODEL, provider="openai", client=client)
+    judge = llm_factory(JUDGE_MODEL, provider="openai", client=client)
+    print(f"[RAGAS] Modelo evaluador: {JUDGE_MODEL}", flush=True)
     metrics = {
         "faithfulness": Faithfulness(llm=judge),
         "answer_relevancy": AnswerRelevancy(
@@ -165,6 +174,7 @@ async def main():
     }
     operations = 0
     blocked = False
+    run_failures = []
     try:
         for k in (5, 7):
             if blocked or operations >= MAX_OPERATIONS:
@@ -218,12 +228,29 @@ async def main():
                             if record.get(name) is not None:
                                 continue
                             print(f"[k={k}] {row['id']} {name}", flush=True)
-                            result = await metrics[name].ascore(**metric_inputs(name, row))
-                            val = float(result.value)
-                            if not math.isfinite(val):
-                                raise RuntimeError(f"Metrica no finita: {name} {row['id']}")
+                            operations += 1  # Contar también las operaciones que fallan.
+                            try:
+                                result = await metrics[name].ascore(**metric_inputs(name, row))
+                                val = float(result.value)
+                                if not math.isfinite(val):
+                                    raise RuntimeError(f"Metrica no finita: {name} {row['id']}")
+                            except Exception as exc:
+                                if is_quota_error(exc):
+                                    raise  # Detener por cuota y conservar el avance.
+                                if is_json_error(exc):
+                                    # Fallo de salida estructurada: NO asignar 0 ni detener todo.
+                                    failure = {
+                                        "top_k": k, "id": row["id"], "metrica": name,
+                                        "error": "json_validate_failed",
+                                        "evaluador": JUDGE_MODEL,
+                                    }
+                                    run_failures.append(failure)
+                                    print(f"[JSON] {row['id']} {name}: respuesta estructurada rechazada; sigue pendiente.", flush=True)
+                                    save_json(OUTPUT_DIR / "errores_json_ultima_ejecucion.json", run_failures)
+                                    await asyncio.sleep(PAUSE_SECONDS)
+                                    continue
+                                raise
                             record[name] = val
-                            operations += 1
                             write_scores(scores_path, expected_ids, scores)
                             print(f"[k={k}] {row['id']} {name}={val:.4f}", flush=True)
                             await asyncio.sleep(PAUSE_SECONDS)
