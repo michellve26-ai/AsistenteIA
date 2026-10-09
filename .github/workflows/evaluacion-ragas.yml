@@ -35,9 +35,12 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install \
             "ragas==0.4.3" \
+            "langchain-community==0.4.1" \
             "groq" \
             "instructor" \
             "pandas"
+          python -m pip check
+
 
       - name: Verificar dependencias
         run: |
