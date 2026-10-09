@@ -1,8 +1,9 @@
+
 """
 Embeddings locales ligeros con FastEmbed y base vectorial ChromaDB.
 
-Esta implementación evita Sentence Transformers / PyTorch para reducir
-el consumo de memoria en entornos con recursos limitados como Render.
+Utiliza ONNX Runtime para reducir el consumo de memoria
+en entornos con recursos limitados como Render.
 """
 
 import os
@@ -15,9 +16,9 @@ from langchain_chroma import Chroma
 from . import config
 
 
-
 def get_embeddings() -> FastEmbedEmbeddings:
     """Inicializa el modelo de embeddings y registra su tiempo de carga."""
+
     inicio = time.perf_counter()
 
     print(
@@ -25,7 +26,7 @@ def get_embeddings() -> FastEmbedEmbeddings:
         flush=True,
     )
 
-      try:
+    try:
         embeddings = FastEmbedEmbeddings(
             model_name=config.EMBEDDING_MODEL,
             threads=1,
@@ -34,6 +35,7 @@ def get_embeddings() -> FastEmbedEmbeddings:
         )
 
         duracion = time.perf_counter() - inicio
+
         print(
             f"[EMBEDDINGS] Modelo cargado en {duracion:.2f} segundos",
             flush=True,
@@ -57,6 +59,7 @@ def build_vectorstore(
     """
     Crea o recrea la base vectorial a partir de los fragmentos.
     """
+
     if rebuild and os.path.exists(config.PERSIST_DIR):
         shutil.rmtree(config.PERSIST_DIR)
 
@@ -70,7 +73,8 @@ def build_vectorstore(
 
     print(
         "[OK] Base vectorial creada: "
-        f"{vector_store._collection.count()} fragmentos indexados."
+        f"{vector_store._collection.count()} fragmentos indexados.",
+        flush=True,
     )
 
     return vector_store
@@ -80,8 +84,9 @@ def load_vectorstore(
     embeddings: FastEmbedEmbeddings,
 ) -> Chroma:
     """
-    Carga una base vectorial existente sin volver a procesar los PDFs.
+    Carga una base vectorial existente sin volver a procesar los PDF.
     """
+
     if not os.path.exists(config.PERSIST_DIR):
         raise FileNotFoundError(
             f"No existe '{config.PERSIST_DIR}'. "
@@ -99,6 +104,7 @@ def index_exists() -> bool:
     """
     Verifica si existe una base vectorial persistida.
     """
+
     return (
         os.path.exists(config.PERSIST_DIR)
         and len(os.listdir(config.PERSIST_DIR)) > 0
