@@ -1,24 +1,38 @@
-
 name: Evaluacion Ragas
 
 on:
   workflow_dispatch:
+    inputs:
+      resume_run_id:
+        description: "ID de ejecucion anterior con artefacto resultados-evaluacion-ragas (vacio = comenzar sin datos)"
+        required: false
+        type: string
+        default: "37963089328"
+      max_operations:
+        description: "Maximo de generaciones o metricas nuevas esta vez"
+        required: true
+        type: choice
+        options:
+          - "4"
+          - "2"
+          - "6"
+        default: "4"
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   evaluar-rag:
     name: Evaluar asistente RAG
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
-
+    timeout-minutes: 55
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       PERSIST_DIR: chroma_db_minilm_l6
       PYTHONUNBUFFERED: "1"
-      PIP_DISABLE_PIP_VERSION_CHECK: "1"
-
+      RAGAS_MAX_OPERATIONS: ${{ inputs.max_operations }}
+      RAGAS_PAUSE_SECONDS: "18"
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
@@ -31,110 +45,49 @@ jobs:
 
       - name: Instalar dependencias
         run: |
-          python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install \
             "ragas==0.4.3" \
             "langchain-community==0.4.1" \
-            "groq" \
-            "instructor" \
-            "pandas"
+            "groq" "instructor" "pandas"
           python -m pip check
+          python -c "import ragas; print('Ragas OK')"
 
+      - name: Recuperar resultados anteriores
+        if: ${{ inputs.resume_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: resultados-evaluacion-ragas
+          path: evaluacion/resultados
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verificar dependencias
+      - name: Verificar datos recuperados
         run: |
-          python -m pip check
-          python -m pip show ragas
-          python -m pip show langchain-community
-          python -m pip show langchain-core
-          python -m pip show fastembed
-
-      - name: Verificar importaciones
-        run: |
-          python - <<'PY'
-          import importlib.metadata
-
-          print(
-              "Ragas:",
-              importlib.metadata.version("ragas"),
-              flush=True,
-          )
-
-          import ragas
-
-          print(
-              "Ragas importado correctamente",
-              flush=True,
-          )
-
-          from src.rag_chain import rag_pipeline
-          from src.vectorstore import get_embeddings
-
-          print(
-              "Pipeline RAG importado correctamente",
-              flush=True,
-          )
-          PY
+          mkdir -p evaluacion/resultados
+          find evaluacion/resultados -maxdepth 1 -type f -printf '%f\n'
 
       - name: Comprobar credenciales
         run: |
-          if [ -z "$GROQ_API_KEY" ]; then
-            echo "ERROR: Falta configurar GROQ_API_KEY"
-            exit 1
-          fi
-
-          echo "Credenciales configuradas correctamente"
+          test -n "$GROQ_API_KEY" || (echo 'Falta GROQ_API_KEY' && exit 1)
 
       - name: Reconstruir indice ChromaDB
         run: |
           python - <<'PY'
           from src.ingest import load_pdfs, split_documents
-          from src.vectorstore import (
-              get_embeddings,
-              build_vectorstore,
-          )
-
-          print("Cargando documentos PDF...", flush=True)
-          docs = load_pdfs()
-
-          print("Generando fragmentos...", flush=True)
-          chunks = split_documents(docs)
-
+          from src.vectorstore import get_embeddings, build_vectorstore
+          chunks = split_documents(load_pdfs())
           if not chunks:
-              raise RuntimeError(
-                  "No se cargaron fragmentos de los documentos PDF"
-              )
-
-          print("Cargando embeddings...", flush=True)
-          embeddings = get_embeddings()
-
-          print("Reconstruyendo ChromaDB...", flush=True)
-          store = build_vectorstore(
-              chunks,
-              embeddings,
-              rebuild=True,
-          )
-
-          total = store._collection.count()
-
-          if total == 0:
-              raise RuntimeError(
-                  "La base vectorial quedo vacia"
-              )
-
-          print(
-              f"Fragmentos indexados: {total}",
-              flush=True,
-          )
+              raise RuntimeError('Corpus PDF vacio')
+          store = build_vectorstore(chunks, get_embeddings(), rebuild=True)
+          print('Fragmentos indexados:', store._collection.count(), flush=True)
           PY
 
-      - name: Ejecutar evaluacion Ragas
-        run: |
-          mkdir -p evaluacion/resultados
-          python -m evaluacion.evaluate_rag
+      - name: Evaluar lote reanudable
+        run: python -m evaluacion.evaluate_rag
 
-      - name: Guardar resultados
+      - name: Guardar resultados parciales o completos
         if: always()
         uses: actions/upload-artifact@v4
         with:
