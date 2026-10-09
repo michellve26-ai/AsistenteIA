@@ -9,6 +9,7 @@ import json
 import math
 import os
 import re
+import random
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -33,7 +34,10 @@ NO_ENCONTRADO = (
     "Te recomiendo escalar el caso al equipo correspondiente."
 )
 # Numero maximo de operaciones (generaciones O metricas) por ejecucion.
-MAX_OPERATIONS = int(os.getenv("RAGAS_MAX_OPERATIONS", "5"))
+MAX_OPERATIONS = int(os.getenv("RAGAS_MAX_OPERATIONS", "100"))
+K_VALUES = tuple(int(x.strip()) for x in os.getenv("RAGAS_K_VALUES", "5").split(",") if x.strip())
+MAX_RATE_RETRIES = int(os.getenv("RAGAS_MAX_RATE_RETRIES", "80"))
+MAX_WAIT_SECONDS = float(os.getenv("RAGAS_MAX_WAIT_SECONDS", "3600"))
 JUDGE_MODEL = os.getenv("RAGAS_JUDGE_MODEL", config.GROQ_MODEL)
 JUDGE_MODE = os.getenv("RAGAS_JUDGE_MODE", "MD_JSON").strip().upper()
 JUDGE_MAX_TOKENS = int(os.getenv("RAGAS_JUDGE_MAX_TOKENS", "4096"))
@@ -157,6 +161,8 @@ async def main():
     questions = read_json(DATASET_PATH, [])
     if len(questions) < 15 or len(set(q["id"] for q in questions)) != len(questions):
         raise RuntimeError("Se necesitan >=15 preguntas con ids distintos")
+    if not K_VALUES or any(k not in (5, 7) for k in K_VALUES):
+        raise ValueError("RAGAS_K_VALUES debe ser 5, 7 o 5,7")
     if MAX_OPERATIONS <= 0:
         raise ValueError("RAGAS_MAX_OPERATIONS debe ser positivo")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -207,7 +213,7 @@ async def main():
         f"reintentar={RETRY_JSON_ERRORS}", flush=True,
     )
     try:
-        for k in (5, 7):
+        for k in K_VALUES:
             if blocked or operations >= MAX_OPERATIONS:
                 break
             responses_path = OUTPUT_DIR / f"respuestas_k{k}.json"
@@ -245,7 +251,15 @@ async def main():
 
                 # No puntuar preguntas con respuesta pendiente hasta completar el conjunto.
                 if len(rows) == len(questions):
-                    for row in rows:
+                    # Priorizar operaciones nunca bloqueadas; reintentar formatos fallidos al final.
+                    ordered_rows = sorted(
+                        rows,
+                        key=lambda r: sum(
+                            (k, r["id"], metric, JUDGE_MODE) in skip_json
+                            for metric in METRIC_NAMES
+                        ),
+                    )
+                    for row in ordered_rows:
                         if operations >= MAX_OPERATIONS:
                             break
                         if row["expected_behavior"] != "answer":
@@ -268,7 +282,25 @@ async def main():
                             print(f"[k={k}] {row['id']} {name}", flush=True)
                             operations += 1  # Contar también las operaciones que fallan.
                             try:
-                                result = await metrics[name].ascore(**metric_inputs(name, row))
+                                # Esperar automaticamente si la cuota por minuto/dia se agota.
+                                for rate_attempt in range(MAX_RATE_RETRIES + 1):
+                                    try:
+                                        result = await metrics[name].ascore(**metric_inputs(name, row))
+                                        break
+                                    except Exception as rate_exc:
+                                        if not is_quota_error(rate_exc):
+                                            raise
+                                        if rate_attempt == MAX_RATE_RETRIES:
+                                            raise
+                                        advertised = quota_delay_seconds(rate_exc)
+                                        if advertised is None:
+                                            advertised = 120
+                                        wait = max(15.0, advertised + 10.0)
+                                        if wait > MAX_WAIT_SECONDS:
+                                            print(f"[CUOTA] Espera requerida {wait:.1f}s supera el maximo {MAX_WAIT_SECONDS:.1f}s", flush=True)
+                                            raise
+                                        print(f"[CUOTA] 429; espera automatica {wait:.1f}s; reintento {rate_attempt+1}/{MAX_RATE_RETRIES}", flush=True)
+                                        await asyncio.sleep(wait)
                                 val = float(result.value)
                                 if not math.isfinite(val):
                                     raise RuntimeError(f"Metrica no finita: {name} {row['id']}")
@@ -324,11 +356,13 @@ async def main():
         if file.exists():
             comparisons.append(read_json(file, {}))
     save_json(OUTPUT_DIR / "comparacion.json", comparisons)
-    complete = len(comparisons) == 2 and all(
-        item["preguntas_respondidas"] == len(questions)
+    complete = all(
+        (item := next((r for r in comparisons if r.get("top_k") == k), None)) is not None
+        and item["preguntas_respondidas"] == len(questions)
         and all(v["evaluadas"] == v["esperadas"] for v in item["metricas"].values())
-        for item in comparisons
+        for k in K_VALUES
     )
+    print(f"[ESTADO] valores de k procesados={K_VALUES}", flush=True)
     print(
         f"[ESTADO] operaciones nuevas={operations}; "
         f"bloqueos_json={len(skip_json)}; evaluacion_completa={complete}", flush=True,
