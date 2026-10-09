@@ -1,16 +1,13 @@
-"""Evaluacion Ragas 0.4: top_k=5 frente a top_k=7 para OficinaPro.
+"""Evaluacion Ragas 0.4 reanudable (k=5 y k=7).
 
-Ejecutar desde la raiz: python -m evaluacion.evaluate_rag
-Los resultados son experimentales y solo son validos cuando las metricas
-se calculan para todas las preguntas evaluables.
+Los resultados se restauran desde un artefacto previo de GitHub Actions.
+No reemplazar ni cambiar corpus, modelo de embeddings o ground truths entre ejecuciones.
 """
-
 import asyncio
 import csv
 import json
 import math
 import os
-import random
 import re
 from pathlib import Path
 
@@ -19,10 +16,7 @@ from openai import AsyncOpenAI
 from ragas.embeddings.base import BaseRagasEmbedding
 from ragas.llms import llm_factory
 from ragas.metrics.collections import (
-    AnswerRelevancy,
-    ContextPrecisionWithReference,
-    ContextRecall,
-    Faithfulness,
+    AnswerRelevancy, ContextPrecisionWithReference, ContextRecall, Faithfulness,
 )
 
 from src import config
@@ -32,25 +26,17 @@ from src.vectorstore import get_embeddings, load_vectorstore
 ROOT = Path(__file__).resolve().parents[1]
 DATASET_PATH = ROOT / "evaluacion" / "preguntas_ragas.json"
 OUTPUT_DIR = ROOT / "evaluacion" / "resultados"
+METRIC_NAMES = ("faithfulness", "answer_relevancy", "context_precision", "context_recall")
 NO_ENCONTRADO = (
     "No encontré esto en los manuales. "
     "Te recomiendo escalar el caso al equipo correspondiente."
 )
-METRIC_NAMES = (
-    "faithfulness",
-    "answer_relevancy",
-    "context_precision",
-    "context_recall",
-)
-TOP_K_VALUES = (5, 7)
-MAX_RETRIES = 8
-# Pausa entre llamadas; modificable en GitHub Actions sin tocar Render.
-REQUEST_PAUSE = float(os.getenv("RAGAS_REQUEST_PAUSE", "8"))
+# Numero maximo de operaciones (generaciones O metricas) por ejecucion.
+MAX_OPERATIONS = int(os.getenv("RAGAS_MAX_OPERATIONS", "5"))
+PAUSE_SECONDS = float(os.getenv("RAGAS_PAUSE_SECONDS", "15"))
 
 
 class FastEmbedRagasAdapter(BaseRagasEmbedding):
-    """Usa el mismo modelo local para la metrica AnswerRelevancy."""
-
     def __init__(self, embedding_model):
         super().__init__()
         self.embedding_model = embedding_model
@@ -62,71 +48,114 @@ class FastEmbedRagasAdapter(BaseRagasEmbedding):
         return await asyncio.to_thread(self.embed_text, text)
 
 
-def save_json(path: Path, payload):
+def save_json(path: Path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(path.suffix + ".tmp")
-    temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     temp.replace(path)
 
 
-def save_csv(path: Path, rows):
+def read_json(path, default):
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
+
+
+def read_scores(path):
+    if not path.exists():
+        return {}
+    with path.open(encoding="utf-8", newline="") as f:
+        result = {}
+        for row in csv.DictReader(f):
+            result[row["id"]] = {
+                key: parse_score(row.get(key)) for key in METRIC_NAMES
+            }
+        return result
+
+
+def parse_score(value):
+    if value in (None, "", "None", "nan"):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def write_scores(path, ids, scores):
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(path.suffix + ".tmp")
-    with temp.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=("id", *METRIC_NAMES))
+    temp = path.with_suffix(".csv.tmp")
+    with temp.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=("id", *METRIC_NAMES))
         writer.writeheader()
-        writer.writerows(rows)
+        for qid in ids:
+            if qid in scores:
+                writer.writerow({"id": qid, **scores[qid]})
     temp.replace(path)
 
 
-def is_rate_limit_error(exc: Exception) -> bool:
-    status = getattr(exc, "status_code", None)
-    message = str(exc).lower()
-    return status == 429 or "ratelimit" in type(exc).__name__.lower() or (
-        "429" in message and ("rate" in message or "token" in message)
-    )
+def metric_inputs(name, row):
+    inputs = {"user_input": row["question"]}
+    if name == "faithfulness":
+        return {**inputs, "response": row["answer"], "retrieved_contexts": row["contexts"]}
+    if name == "answer_relevancy":
+        return {**inputs, "response": row["answer"]}
+    return {**inputs, "reference": row["ground_truth"], "retrieved_contexts": row["contexts"]}
 
 
-def retry_delay(exc: Exception, attempt: int) -> float:
-    """Respeta Retry-After cuando sea posible; limita el backoff."""
-    response = getattr(exc, "response", None)
-    headers = getattr(response, "headers", {}) or {}
-    try:
-        retry_after = float(headers.get("retry-after", 0))
-    except (TypeError, ValueError):
-        retry_after = 0.0
-    match = re.search(r"(?:try again in|retry after)\s+([0-9.]+)\s*s", str(exc), re.I)
-    if match:
-        retry_after = max(retry_after, float(match.group(1)))
-    return min(120.0, max(retry_after + 2, 15.0 * (2 ** min(attempt, 3))) + random.uniform(0, 2))
+def quota_delay_seconds(error):
+    text = str(error)
+    # Esperas anunciadas por Groq en minutos, segundos u horas.
+    m = re.search(r"try again in\s*(?:(\d+)h)?(?:(\d+)m)?([\d.]+)s", text, re.I)
+    if m:
+        return 3600 * int(m.group(1) or 0) + 60 * int(m.group(2) or 0) + float(m.group(3))
+    return None
 
 
-async def with_rate_limit_retry(operation, label: str):
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            return await operation()
-        except Exception as exc:
-            if not is_rate_limit_error(exc) or attempt == MAX_RETRIES:
-                raise
-            delay = retry_delay(exc, attempt)
-            print(f"[429] {label}: esperando {delay:.1f}s; intento {attempt + 1}/{MAX_RETRIES}", flush=True)
-            await asyncio.sleep(delay)
+def is_quota_error(error):
+    return getattr(error, "status_code", None) == 429 or "429" in str(error) and "rate" in str(error).lower()
 
 
-def create_evaluator():
+def summarize(k, rows, scores, expected_ids):
+    answer_rows = [r for r in rows if r["expected_behavior"] == "answer"]
+    out = {
+        "top_k": k, "preguntas_respondidas": len(rows),
+        "total_preguntas": len(expected_ids),
+        "evaluables": len(answer_rows),
+        "metricas": {},
+        "abstenciones_correctas": sum(
+            r["answer"].strip() == NO_ENCONTRADO
+            for r in rows if r["expected_behavior"] == "abstain"
+        ),
+        "total_fuera_de_alcance": sum(r["expected_behavior"] == "abstain" for r in rows),
+    }
+    for name in METRIC_NAMES:
+        values = [scores.get(r["id"], {}).get(name) for r in answer_rows]
+        valid = [v for v in values if v is not None]
+        out["metricas"][name] = {
+            "promedio": round(sum(valid) / len(valid), 4) if valid else None,
+            "evaluadas": len(valid), "esperadas": sum(r["expected_behavior"] == "answer" for r in expected_ids),
+        }
+    return out
+
+
+async def main():
+    load_dotenv(ROOT / ".env")
+    if not os.getenv("GROQ_API_KEY"):
+        raise RuntimeError("Falta GROQ_API_KEY")
+    questions = read_json(DATASET_PATH, [])
+    if len(questions) < 15 or len(set(q["id"] for q in questions)) != len(questions):
+        raise RuntimeError("Se necesitan >=15 preguntas con ids distintos")
+    if MAX_OPERATIONS <= 0:
+        raise ValueError("RAGAS_MAX_OPERATIONS debe ser positivo")
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    embeddings = get_embeddings()
+    store = load_vectorstore(embeddings)
+    generator = get_llm()
+    template = get_prompt_template()
     client = AsyncOpenAI(
         api_key=os.environ["GROQ_API_KEY"],
-        base_url="https://api.groq.com/openai/v1",
-        timeout=90.0,
-        max_retries=1,
+        base_url="https://api.groq.com/openai/v1", timeout=90, max_retries=0,
     )
     judge = llm_factory(config.GROQ_MODEL, provider="openai", client=client)
-    print(f"[RAGAS] Evaluador Groq: {config.GROQ_MODEL}", flush=True)
-    return judge, client
-
-
-def create_metrics(judge, embeddings):
-    return {
+    metrics = {
         "faithfulness": Faithfulness(llm=judge),
         "answer_relevancy": AnswerRelevancy(
             llm=judge, embeddings=FastEmbedRagasAdapter(embeddings)
@@ -134,155 +163,98 @@ def create_metrics(judge, embeddings):
         "context_precision": ContextPrecisionWithReference(llm=judge),
         "context_recall": ContextRecall(llm=judge),
     }
-
-
-def metric_inputs(name, row):
-    common = {"user_input": row["question"]}
-    if name == "faithfulness":
-        return {**common, "response": row["answer"], "retrieved_contexts": row["contexts"]}
-    if name == "answer_relevancy":
-        return {**common, "response": row["answer"]}
-    if name in ("context_precision", "context_recall"):
-        return {**common, "reference": row["ground_truth"], "retrieved_contexts": row["contexts"]}
-    raise ValueError(f"Metrica desconocida: {name}")
-
-
-async def generate_row(item, top_k, store, generator, template):
-    async def call():
-        return await asyncio.to_thread(
-            rag_pipeline, store, generator, template,
-            item["user_input"], top_k, [],
-        )
-
-    result = await with_rate_limit_retry(call, f"generacion {item['id']} k={top_k}")
-    return {
-        "id": item["id"],
-        "question": item["user_input"],
-        "answer": str(result["respuesta"]),
-        "contexts": [doc.page_content for doc in result["fragmentos"]],
-        "ground_truth": item["reference"],
-        "expected_behavior": item["expected_behavior"],
-        "source_document": item.get("source_document"),
-        "source_page": item.get("source_page"),
-    }
-
-
-async def score_row(row, metrics, top_k):
-    scores = {"id": row["id"], **{name: None for name in METRIC_NAMES}}
-    if row["expected_behavior"] != "answer":
-        return scores
-    for name, metric in metrics.items():
-        async def call():
-            return await metric.ascore(**metric_inputs(name, row))
-
-        try:
-            result = await with_rate_limit_retry(call, f"{name} {row['id']} k={top_k}")
-            value = float(result.value)
-            if not math.isfinite(value):
-                raise ValueError("Valor no finito")
-            scores[name] = value
-            print(f"[k={top_k}] {row['id']} {name}: {value:.4f}", flush=True)
-        except Exception as exc:
-            print(f"[ERROR] k={top_k}, {row['id']}, {name}: {type(exc).__name__}: {exc}", flush=True)
-        await asyncio.sleep(REQUEST_PAUSE)
-    return scores
-
-
-def build_summary(rows, score_rows, top_k):
-    eligible = sum(row["expected_behavior"] == "answer" for row in rows)
-    abstentions = [row for row in rows if row["expected_behavior"] == "abstain"]
-    summary = {
-        "top_k": top_k,
-        "total_preguntas": len(rows),
-        "evaluables": eligible,
-        "metricas": {},
-        "abstenciones_correctas": sum(row["answer"].strip() == NO_ENCONTRADO for row in abstentions),
-        "total_fuera_de_alcance": len(abstentions),
-    }
-    incomplete = False
-    for metric in METRIC_NAMES:
-        values = [row[metric] for row in score_rows if row[metric] is not None]
-        summary["metricas"][metric] = {
-            "promedio": round(sum(values) / len(values), 4) if values else None,
-            "evaluadas": len(values),
-            "esperadas": eligible,
-        }
-        if len(values) != eligible:
-            incomplete = True
-    return summary, incomplete
-
-
-async def evaluate_configuration(k, questions, store, generator, template, metrics):
-    responses_path = OUTPUT_DIR / f"respuestas_k{k}.json"
-    scores_path = OUTPUT_DIR / f"metricas_k{k}.csv"
-    summary_path = OUTPUT_DIR / f"resumen_k{k}.json"
-
-    # Reutiliza respuestas completas de una ejecucion previa si se guardaron
-    # en el mismo runner. En Actions, cada ejecucion comienza con disco nuevo.
-    rows = []
-    if responses_path.exists():
-        saved = json.loads(responses_path.read_text(encoding="utf-8"))
-        if isinstance(saved, list):
-            rows = saved
-    ids = [row["id"] for row in rows]
-    expected_ids = [item["id"] for item in questions]
-    if ids != expected_ids[:len(ids)]:
-        raise ValueError("Las respuestas guardadas no corresponden al dataset actual")
-
-    for i, item in enumerate(questions[len(rows):], start=len(rows) + 1):
-        print(f"[k={k}] Generando {i}/{len(questions)}: {item['id']}", flush=True)
-        rows.append(await generate_row(item, k, store, generator, template))
-        save_json(responses_path, rows)
-        await asyncio.sleep(REQUEST_PAUSE)
-
-    score_rows = []
-    for i, row in enumerate(rows, 1):
-        print(f"[k={k}] Metricas {i}/{len(rows)}: {row['id']}", flush=True)
-        score_rows.append(await score_row(row, metrics, k))
-        save_csv(scores_path, score_rows)
-
-    summary, incomplete = build_summary(rows, score_rows, k)
-    save_json(summary_path, summary)
-    print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
-    return summary, incomplete
-
-
-async def main():
-    load_dotenv(ROOT / ".env")
-    if not os.getenv("GROQ_API_KEY"):
-        raise RuntimeError("Falta GROQ_API_KEY")
-    if not DATASET_PATH.is_file():
-        raise FileNotFoundError(f"Falta {DATASET_PATH}")
-    questions = json.loads(DATASET_PATH.read_text(encoding="utf-8"))
-    if not isinstance(questions, list) or len(questions) < 15:
-        raise ValueError("Se requieren al menos 15 preguntas")
-    if len({item["id"] for item in questions}) != len(questions):
-        raise ValueError("Hay IDs de preguntas duplicados")
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    embeddings = get_embeddings()
-    store = load_vectorstore(embeddings)
-    generator = get_llm()
-    template = get_prompt_template()
-    judge, judge_client = create_evaluator()
-    metrics = create_metrics(judge, embeddings)
-    summaries = []
-    incomplete = False
-
+    operations = 0
+    blocked = False
     try:
-        for k in TOP_K_VALUES:
-            summary, partial = await evaluate_configuration(
-                k, questions, store, generator, template, metrics
-            )
-            summaries.append(summary)
-            incomplete = incomplete or partial
-            save_json(OUTPUT_DIR / "comparacion.json", summaries)
-    finally:
-        await judge_client.close()
+        for k in (5, 7):
+            if blocked or operations >= MAX_OPERATIONS:
+                break
+            responses_path = OUTPUT_DIR / f"respuestas_k{k}.json"
+            scores_path = OUTPUT_DIR / f"metricas_k{k}.csv"
+            rows = read_json(responses_path, [])
+            expected_ids = [q["id"] for q in questions]
+            if [r["id"] for r in rows] != expected_ids[:len(rows)]:
+                raise RuntimeError(f"respuestas_k{k} no coincide con el dataset actual")
+            scores = read_scores(scores_path)
+            saved_lookup = {r["id"]: r for r in rows}
+            try:
+                # Generar solo respuestas faltantes; respetar el mismo orden.
+                for item in questions[len(rows):]:
+                    if operations >= MAX_OPERATIONS:
+                        break
+                    print(f"[k={k}] Generando {item['id']}", flush=True)
+                    result = await asyncio.to_thread(
+                        rag_pipeline, store, generator, template,
+                        item["user_input"], k, [],
+                    )
+                    row = {
+                        "id": item["id"], "question": item["user_input"],
+                        "answer": str(result["respuesta"]),
+                        "contexts": [d.page_content for d in result["fragmentos"]],
+                        "ground_truth": item["reference"],
+                        "expected_behavior": item["expected_behavior"],
+                        "source_document": item.get("source_document"),
+                        "source_page": item.get("source_page"),
+                    }
+                    rows.append(row)
+                    saved_lookup[row["id"]] = row
+                    save_json(responses_path, rows)
+                    operations += 1
+                    await asyncio.sleep(PAUSE_SECONDS)
 
-    if incomplete:
-        raise RuntimeError("Evaluacion parcial: revisar metricas no calculadas")
-    print("[OK] Evaluacion Ragas completa", flush=True)
+                # No puntuar preguntas con respuesta pendiente hasta completar el conjunto.
+                if len(rows) == len(questions):
+                    for row in rows:
+                        if operations >= MAX_OPERATIONS:
+                            break
+                        if row["expected_behavior"] != "answer":
+                            continue
+                        record = scores.setdefault(
+                            row["id"], {name: None for name in METRIC_NAMES}
+                        )
+                        for name in METRIC_NAMES:
+                            if operations >= MAX_OPERATIONS:
+                                break
+                            if record.get(name) is not None:
+                                continue
+                            print(f"[k={k}] {row['id']} {name}", flush=True)
+                            result = await metrics[name].ascore(**metric_inputs(name, row))
+                            val = float(result.value)
+                            if not math.isfinite(val):
+                                raise RuntimeError(f"Metrica no finita: {name} {row['id']}")
+                            record[name] = val
+                            operations += 1
+                            write_scores(scores_path, expected_ids, scores)
+                            print(f"[k={k}] {row['id']} {name}={val:.4f}", flush=True)
+                            await asyncio.sleep(PAUSE_SECONDS)
+            except Exception as exc:
+                if is_quota_error(exc):
+                    wait = quota_delay_seconds(exc)
+                    print(f"[CUOTA] Groq alcanzo el limite; esperar {wait or 'periodo de renovacion'} segundos y reanudar en otra ejecucion.", flush=True)
+                    blocked = True
+                else:
+                    # No ocultar errores de programacion o de datos.
+                    raise
+            finally:
+                write_scores(scores_path, expected_ids, scores)
+                save_json(OUTPUT_DIR / f"resumen_k{k}.json", summarize(k, rows, scores, questions))
+    finally:
+        await client.close()
+
+    comparisons = []
+    for k in (5, 7):
+        file = OUTPUT_DIR / f"resumen_k{k}.json"
+        if file.exists():
+            comparisons.append(read_json(file, {}))
+    save_json(OUTPUT_DIR / "comparacion.json", comparisons)
+    complete = len(comparisons) == 2 and all(
+        item["preguntas_respondidas"] == len(questions)
+        and all(v["evaluadas"] == v["esperadas"] for v in item["metricas"].values())
+        for item in comparisons
+    )
+    print(f"[ESTADO] operaciones nuevas={operations}; evaluacion_completa={complete}", flush=True)
+    if not complete:
+        print("[PENDIENTE] Descargar el artefacto y reanudar con su run ID en GitHub Actions.", flush=True)
 
 
 if __name__ == "__main__":
