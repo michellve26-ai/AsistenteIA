@@ -1,3 +1,4 @@
+
 name: Evaluacion Ragas
 
 on:
@@ -8,12 +9,16 @@ permissions:
 
 jobs:
   evaluar-rag:
-    runs-on: ubuntu-latest
+    name: Evaluar asistente RAG
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
+
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       PERSIST_DIR: chroma_db_minilm_l6
       PYTHONUNBUFFERED: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
@@ -24,46 +29,107 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-           - name: Instalar dependencias
+      - name: Instalar dependencias
         run: |
+          python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install \
             "ragas==0.4.3" \
-            "langchain-community==0.3.31" \
             "groq" \
             "instructor" \
             "pandas"
-          python -m pip check
-          python -c "import ragas; print('Ragas importado correctamente')"
-          
-      - name: Verificar version de Ragas
+
+      - name: Verificar dependencias
         run: |
-          python -m pip show ragas
           python -m pip check
+          python -m pip show ragas
+          python -m pip show langchain-community
+          python -m pip show langchain-core
+          python -m pip show fastembed
+
+      - name: Verificar importaciones
+        run: |
+          python - <<'PY'
+          import importlib.metadata
+
+          print(
+              "Ragas:",
+              importlib.metadata.version("ragas"),
+              flush=True,
+          )
+
+          import ragas
+
+          print(
+              "Ragas importado correctamente",
+              flush=True,
+          )
+
+          from src.rag_chain import rag_pipeline
+          from src.vectorstore import get_embeddings
+
+          print(
+              "Pipeline RAG importado correctamente",
+              flush=True,
+          )
+          PY
 
       - name: Comprobar credenciales
         run: |
           if [ -z "$GROQ_API_KEY" ]; then
-            echo "ERROR: Falta GROQ_API_KEY"
+            echo "ERROR: Falta configurar GROQ_API_KEY"
             exit 1
           fi
+
+          echo "Credenciales configuradas correctamente"
 
       - name: Reconstruir indice ChromaDB
         run: |
           python - <<'PY'
           from src.ingest import load_pdfs, split_documents
-          from src.vectorstore import get_embeddings, build_vectorstore
+          from src.vectorstore import (
+              get_embeddings,
+              build_vectorstore,
+          )
 
+          print("Cargando documentos PDF...", flush=True)
           docs = load_pdfs()
+
+          print("Generando fragmentos...", flush=True)
           chunks = split_documents(docs)
+
           if not chunks:
-              raise RuntimeError("No se cargaron fragmentos de los documentos PDF")
-          store = build_vectorstore(chunks, get_embeddings(), rebuild=True)
-          print(f"Fragmentos indexados: {store._collection.count()}", flush=True)
+              raise RuntimeError(
+                  "No se cargaron fragmentos de los documentos PDF"
+              )
+
+          print("Cargando embeddings...", flush=True)
+          embeddings = get_embeddings()
+
+          print("Reconstruyendo ChromaDB...", flush=True)
+          store = build_vectorstore(
+              chunks,
+              embeddings,
+              rebuild=True,
+          )
+
+          total = store._collection.count()
+
+          if total == 0:
+              raise RuntimeError(
+                  "La base vectorial quedo vacia"
+              )
+
+          print(
+              f"Fragmentos indexados: {total}",
+              flush=True,
+          )
           PY
 
       - name: Ejecutar evaluacion Ragas
-        run: python -m evaluacion.evaluate_rag
+        run: |
+          mkdir -p evaluacion/resultados
+          python -m evaluacion.evaluate_rag
 
       - name: Guardar resultados
         if: always()
