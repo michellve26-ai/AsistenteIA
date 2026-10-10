@@ -4,16 +4,19 @@ on:
   workflow_dispatch:
     inputs:
       resume_run_id:
-        description: "ID de la ejecucion con 46 resultados validos de k=5"
+        description: "ID del run con las 48 metricas de k=5 (o del ultimo avance de k=7)"
         required: true
         type: string
+        default: "38011954201"
       max_operations:
-        description: "Operaciones maximas en esta ejecucion"
+        description: "Maximo de generaciones y metricas nuevas para k=7"
         required: true
         type: choice
         options:
-          - "2"
-        default: "2"
+          - "100"
+          - "65"
+          - "20"
+        default: "100"
 
 permissions:
   contents: read
@@ -21,7 +24,7 @@ permissions:
 
 jobs:
   evaluar-rag:
-    name: Evaluar asistente RAG
+    name: Evaluar top_k=7 y comparar con top_k=5
     runs-on: ubuntu-24.04
     timeout-minutes: 300
     env:
@@ -30,10 +33,10 @@ jobs:
       PERSIST_DIR: chroma_db_minilm_l6
       PYTHONUNBUFFERED: "1"
       RAGAS_MAX_OPERATIONS: ${{ inputs.max_operations }}
-      RAGAS_K_VALUES: "5"
+      RAGAS_K_VALUES: "7"
       RAGAS_PAUSE_SECONDS: "75"
-      RAGAS_ONLY_IDS: "P08,P11"
-      RAGAS_ONLY_METRICS: "faithfulness"
+      RAGAS_ONLY_IDS: ""
+      RAGAS_ONLY_METRICS: ""
       RAGAS_JUDGE_MAX_TOKENS: "4096"
       RAGAS_REASONING_EFFORT: "low"
       RAGAS_MAX_RATE_RETRIES: "80"
@@ -69,25 +72,32 @@ jobs:
           run-id: ${{ inputs.resume_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verificar que se recuperaron los 46 resultados
+      - name: Proteger las 48 puntuaciones de top_k=5
         run: |
-          test -s evaluacion/resultados/respuestas_k5.json
-          test -s evaluacion/resultados/metricas_k5.csv
           python - <<'PY2'
           import csv
-          with open('evaluacion/resultados/metricas_k5.csv', newline='', encoding='utf-8') as f:
-              data = list(csv.DictReader(f))
-          total = sum(value not in ('', 'None', 'nan') for row in data for key, value in row.items() if key != 'id')
-          print('Puntuaciones recuperadas:', total)
-          pending = [(row['id'], key) for row in data for key in ('faithfulness','answer_relevancy','context_precision','context_recall') if row[key] in ('', 'None', 'nan')]
-          if total != 46 or sorted(pending) != [('P08', 'faithfulness'), ('P11', 'faithfulness')]:
-              raise RuntimeError(f'Se esperaban 46 puntuaciones y dos pendientes P08/P11; total={total}, pendientes={pending}')
+          import json
+          from pathlib import Path
+
+          folder = Path('evaluacion/resultados')
+          path = folder / 'metricas_k5.csv'
+          response_path = folder / 'respuestas_k5.json'
+          if not path.is_file() or not response_path.is_file():
+              raise RuntimeError('Faltan metricas_k5.csv o respuestas_k5.json. Revisa resume_run_id.')
+          with path.open(newline='', encoding='utf-8') as f:
+              rows = list(csv.DictReader(f))
+          fields = ('faithfulness', 'answer_relevancy', 'context_precision', 'context_recall')
+          count = sum(row.get(key, '') not in ('', 'None', 'nan') for row in rows for key in fields)
+          responses = json.loads(response_path.read_text(encoding='utf-8'))
+          print(f'[RESPALDO] k=5: {count}/48 puntuaciones, {len(responses)}/15 respuestas.', flush=True)
+          if count != 48 or len(responses) != 15:
+              raise RuntimeError('k=5 no esta completo; detener para no perder resultados')
           PY2
 
-      - name: Comprobar credenciales y evaluador
+      - name: Comprobar credenciales
         run: |
-          test -n "$GROQ_API_KEY" || (echo "Falta GROQ_API_KEY" && exit 1)
-          test -n "$RAGAS_JUDGE_MODEL" || (echo "Falta RAGAS_JUDGE_MODEL" && exit 1)
+          test -n "$GROQ_API_KEY" || (echo 'Falta GROQ_API_KEY' && exit 1)
+          test -n "$RAGAS_JUDGE_MODEL" || (echo 'Falta RAGAS_JUDGE_MODEL' && exit 1)
           echo "Modelo evaluador: $RAGAS_JUDGE_MODEL"
 
       - name: Reconstruir indice ChromaDB
@@ -102,8 +112,27 @@ jobs:
           print('Fragmentos indexados:', store._collection.count(), flush=True)
           PY2
 
-      - name: Evaluar solo P08 y P11 Faithfulness
+      - name: Generar y evaluar top_k=7 automaticamente
         run: python -m evaluacion.evaluate_rag
+
+      - name: Mostrar progreso final
+        if: always()
+        run: |
+          python - <<'PY2'
+          import csv
+          from pathlib import Path
+          folder = Path('evaluacion/resultados')
+          fields = ('faithfulness', 'answer_relevancy', 'context_precision', 'context_recall')
+          for k in (5, 7):
+              path = folder / f'metricas_k{k}.csv'
+              if not path.is_file():
+                  print(f'[RESULTADO] k={k}: sin puntuaciones todavia', flush=True)
+                  continue
+              with path.open(newline='', encoding='utf-8') as f:
+                  rows = list(csv.DictReader(f))
+              count = sum(row.get(key, '') not in ('', 'None', 'nan') for row in rows for key in fields)
+              print(f'[RESULTADO] k={k}: {count}/48 puntuaciones guardadas', flush=True)
+          PY2
 
       - name: Guardar resultados parciales o completos
         if: always()
