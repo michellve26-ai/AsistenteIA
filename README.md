@@ -91,7 +91,7 @@ Se utiliza el parámetro `top_k`, que define la cantidad de fragmentos recuperad
 
 La configuración inicial de evaluación fue **top_k = 5**.
 
-Como iteración experimental se evalúa **top_k = 7**, con el propósito de estudiar si recuperar más fragmentos mejora la calidad de las respuestas y del contexto seleccionado.
+Como iteración experimental se utiliza **top_k = 7**, con el propósito de estudiar si recuperar más fragmentos mejora la calidad de las respuestas y del contexto seleccionado. La generación de respuestas de esta variante terminó; su evaluación cuantitativa sigue incompleta.
 
 ## 7. Generación de respuestas y prompt
 
@@ -308,27 +308,47 @@ Los resultados de Context Recall muestran que la recuperación aporta gran parte
 
 La interpretación debe considerar que las puntuaciones corresponden al conjunto de evaluación definido y no representan automáticamente el desempeño sobre todas las posibles consultas reales.
 
-### Iteración de mejora: top_k = 7
+### Iteración experimental: top_k = 7
 
-Para estudiar el comportamiento del recuperador se seleccionó una modificación del parámetro `top_k`, pasando de cinco a siete fragmentos recuperados.
+Para estudiar el comportamiento del recuperador se modificó **un parámetro del pipeline**: el número de fragmentos recuperados pasó de `top_k=5` a `top_k=7`. Se mantuvieron el corpus, los embeddings y el conjunto de preguntas de evaluación.
 
-Esta iteración mantiene el corpus documental y el modelo de embeddings, y utiliza el mismo conjunto de preguntas de referencia.
+**Estado verificado en el último artefacto de GitHub Actions:**
 
-Los resultados se registran en los archivos:
+- `top_k=5`: 15 respuestas, **48/48 puntuaciones** (12 preguntas documentales × 4 métricas).
+- `top_k=7`: 15 respuestas generadas, **10/48 puntuaciones** calculadas hasta el momento.
+- Para `top_k=7`, P01 y P02 tienen las cuatro métricas; P03 tiene Faithfulness y Answer Relevancy. Las restantes aún no tienen puntuación válida.
+- El cálculo de las métricas de `top_k=7` se vio interrumpido por límites de tokens de Groq (`HTTP 429`). Los resultados parciales quedaron guardados.
 
-- `metricas_k5.csv`
-- `metricas_k7.csv`
-- `comparacion.json`
+#### Resultados preliminares de top_k = 7
 
-**Los resultados definitivos de top_k = 7 y su interpretación comparativa se incorporarán al finalizar la evaluación.**
+| Pregunta | Faithfulness | Answer Relevancy | Context Precision | Context Recall |
+|---|---:|---:|---:|---:|
+| P01 | 0,6667 | 0,3288 | 0,4762 | 0,5000 |
+| P02 | 0,6667 | 0,1832 | 0,4500 | 1,0000 |
+| P03 | 1,0000 | 0,0569 | Pendiente | Pendiente |
 
-La comparación permitirá determinar si recuperar más fragmentos produjo mejoras o si introdujo contexto adicional que redujo la precisión o fidelidad de las respuestas.
+Estos valores son **parciales**, no promedios finales ni una comparación válida de las 12 preguntas. Por ese motivo no se concluye todavía que `top_k=7` mejore a `top_k=5`.
+
+#### Cómo consultar los resultados
+
+El flujo de evaluación se configura en `.github/workflows/evaluacion-ragas.yml` y ejecuta `python -m evaluacion.evaluate_rag`. El conjunto de 15 preguntas está en `evaluacion/preguntas_ragas.json`.
+
+El workflow permite reanudar desde los artefactos anteriores con `resume_run_id`. Para conservar las mediciones ya realizadas, debe indicarse el identificador de una ejecución que contenga el artefacto `resultados-evaluacion-ragas`; ejecutar sin recuperación puede generar un conjunto de resultados nuevo.
+
+Los archivos producidos por la evaluación incluyen:
+
+- `respuestas_k5.json` y `respuestas_k7.json`: preguntas, respuestas y contextos recuperados.
+- `metricas_k5.csv` y `metricas_k7.csv`: puntuaciones por pregunta y métrica.
+- `resumen_k5.json` y `comparacion.json`: resúmenes disponibles de la evaluación.
+- `errores_json_ultima_ejecucion.json`: incidencias de salida estructurada registradas durante las pruebas.
+
+**Pendiente:** completar las 38 métricas de `top_k=7` para calcular promedios sobre las mismas 12 preguntas y comparar ambas configuraciones de manera homogénea.
 
 ### Consideraciones metodológicas
 
 Durante la evaluación se utilizaron mecanismos de recuperación de resultados parciales y reintentos para gestionar los límites de la API de Groq.
 
-También se realizaron ajustes de configuración del evaluador para tratar problemas de respuestas estructuradas incompletas. Estos ajustes deben tenerse en cuenta al interpretar y reproducir los resultados.
+También se realizaron ajustes de configuración del evaluador y se utilizaron diferentes configuraciones/modelos durante el proceso para tratar salidas estructuradas incompletas. Estas variaciones son una **limitación metodológica**: antes de interpretar cualquier diferencia entre `top_k=5` y `top_k=7` como efecto exclusivo de la recuperación, debe verificarse la comparabilidad del evaluador y, de ser necesario, repetir la evaluación con una configuración homogénea. Las puntuaciones ausentes nunca se reemplazan por ceros inventados.
 
 ## 13. Seguridad y protección de información
 
@@ -345,7 +365,7 @@ Las credenciales se almacenan en variables de entorno y no deben incluirse direc
 Entre las mejoras identificadas se encuentran:
 
 - Optimizar la pertinencia y concisión de las respuestas.
-- Comparar distintas estrategias de recuperación.
+- Completar la evaluación `top_k=7` y comparar ambas configuraciones bajo las mismas condiciones de evaluación.
 - Ampliar y actualizar el conjunto de preguntas de evaluación.
 - Revisar la calidad de los fragmentos y de los metadatos.
 - Reducir la dependencia de límites de cuota durante las evaluaciones.
