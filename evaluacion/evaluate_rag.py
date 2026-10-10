@@ -41,7 +41,7 @@ MAX_WAIT_SECONDS = float(os.getenv("RAGAS_MAX_WAIT_SECONDS", "3600"))
 JUDGE_MODEL = os.getenv("RAGAS_JUDGE_MODEL", config.GROQ_MODEL)
 JUDGE_MODE = os.getenv("RAGAS_JUDGE_MODE", "MD_JSON").strip().upper()
 JUDGE_MAX_TOKENS = int(os.getenv("RAGAS_JUDGE_MAX_TOKENS", "4096"))
-INTEGRATION_VERSION = "instructor_groq_low_reasoning_v1"
+INTEGRATION_VERSION = "instructor_groq_extra_body_v2"
 REASONING_EFFORT = os.getenv("RAGAS_REASONING_EFFORT", "low").lower()
 PAUSE_SECONDS = float(os.getenv("RAGAS_PAUSE_SECONDS", "15"))
 RETRY_JSON_ERRORS = os.getenv("RAGAS_RETRY_JSON_ERRORS", "false").lower() == "true"
@@ -53,7 +53,7 @@ ONLY_METRICS = {x.strip() for x in os.getenv("RAGAS_ONLY_METRICS", "").split(","
 
 
 class GroqInstructorLLM(InstructorLLM):
-    """Inject supported Groq reasoning settings in Ragas 0.4.3.
+    """Send Groq GPT-OSS reasoning options via OpenAI extra_body.
 
     Use provider-specific mapping rather than passing mode or other
     arguments through llm_factory (which breaks in 0.4.3).
@@ -62,8 +62,12 @@ class GroqInstructorLLM(InstructorLLM):
     def _map_openai_params(self):
         args = super()._map_openai_params()
         if self.model.startswith("openai/gpt-oss-"):
-            args["reasoning_effort"] = REASONING_EFFORT
-            args["reasoning_format"] = "hidden"
+            # Groq GPT-OSS does not support reasoning_format. The OpenAI
+            # Python client accepts Groq-specific settings via extra_body.
+            body = dict(args.get("extra_body") or {})
+            body["reasoning_effort"] = REASONING_EFFORT
+            body["include_reasoning"] = False
+            args["extra_body"] = body
         return args
 
 
