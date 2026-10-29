@@ -1,11 +1,13 @@
 """Interfaz de Astrea. Ejecutar con: streamlit run app.py."""
 
+import base64
 import html
 import inspect
 import re
 from contextlib import nullcontext
 
 import streamlit as st
+from streamlit.errors import StreamlitAPIException
 
 from src import config
 from src.faqs import FAQS
@@ -21,225 +23,219 @@ from src.vectorstore import (
 
 UI_NAME = "Astrea"
 
-st.set_page_config(
-    page_title=UI_NAME,
-    page_icon="✨",
-    layout="wide",
-    initial_sidebar_state="auto",
-)
+PAGE_OPTIONS = {"page_title": UI_NAME, "page_icon": "✨", "layout": "wide"}
+try:
+    st.set_page_config(**PAGE_OPTIONS, initial_sidebar_state="locked")
+except StreamlitAPIException as exc:
+    if "locked" not in str(exc):
+        raise
+    st.set_page_config(**PAGE_OPTIONS, initial_sidebar_state="expanded")
 
 st.html("""
 <style>
-/* Astrea: presentación de Streamlit. Las interacciones son componentes nativos. */
-.stApp {
-  --astrea-ink: #1c3553;
-  --astrea-muted: #5e748e;
-  --astrea-line: #dbe6f2;
-  --astrea-panel: #ffffff;
-  --astrea-soft: #f0f6fc;
-  --astrea-blue: #2365ad;
-  --astrea-navy: #123253;
-  color: var(--astrea-ink);
-  background: radial-gradient(ellipse at 92% 8%, #d9ecff 0, transparent 52%), #f1f5fb;
+/* Astrea: tema oscuro y componentes nativos de Streamlit. */
+:root, .stApp {
+  --astrea-bg: #0b1726;
+  --astrea-panel: #192b3d;
+  --astrea-panel-hover: #20364d;
+  --astrea-ink: #edf4fc;
+  --astrea-muted: #aac1d8;
+  --astrea-line: #30465d;
+  --astrea-blue: #91c8ff;
+  --astrea-accent: #2b79c5;
+  color-scheme: dark;
 }
-
-[data-testid="stHeader"] { background: #f1f5fbf0; }
-/* El botón móvil vive dentro del toolbar: solo ocultamos sus acciones técnicas. */
-[data-testid="stAppDeployButton"], [data-testid="stMainMenu"] { display: none; }
+html, body, .stApp { background: #080f1b; color: var(--astrea-ink); }
+.stApp { font-family: Arial, Helvetica, sans-serif; }
+.stApp :is(h1, h2, h3, p, label, input, textarea, button), [data-testid="stDialog"] :is(h1, h2, h3, p, label, input, textarea, button) { font-family: Arial, Helvetica, sans-serif !important; }
+.stApp .stButton p { letter-spacing: normal; }
+[data-testid="stAppViewContainer"] {
+  background: radial-gradient(ellipse at 100% 0, #194e78 0, #112d48 31%, transparent 65%), var(--astrea-bg);
+}
+.stMain, [data-testid="stMain"] { background: transparent; color: var(--astrea-ink); }
+[data-testid="stHeader"] { background: transparent !important; color: var(--astrea-muted); }
+[data-testid="stAppDeployButton"], [data-testid="stMainMenu"], #MainMenu, footer { display: none; }
+[data-testid="stHeader"] button, [data-testid="stSidebarCollapseButton"] button { color: #bad4ee !important; }
+[data-testid="stHeader"] [data-testid="stIconMaterial"], [data-testid="stSidebarCollapseButton"] [data-testid="stIconMaterial"] { color: #bad4ee !important; }
+[data-testid="stSidebarCollapsedControl"] button { background: #143352; border-radius: 9px; color: #e7f2ff !important; }
 .stApp [data-testid="stMainBlockContainer"], .stApp .main .block-container {
-  max-width: 1120px;
-  padding: calc(60px + 1.5rem) 2rem 6rem;
+  max-width: 870px;
+  padding: 24px 28px 26px;
 }
-.stMain [data-testid="stMarkdownContainer"],
-.stMain [data-testid="stWidgetLabel"] { color: var(--astrea-ink); }
-.stMain [data-testid="stCaptionContainer"] { color: var(--astrea-muted); }
+.stApp [data-testid="stMarkdownContainer"], .stApp [data-testid="stWidgetLabel"],
+[data-testid="stDialog"] [data-testid="stMarkdownContainer"] { color: var(--astrea-ink); }
+.stApp [data-testid="stCaptionContainer"] { color: var(--astrea-muted); }
+.stApp [data-testid="stCaptionContainer"] p, [data-testid="stDialog"] [data-testid="stCaptionContainer"] p { color: var(--astrea-muted) !important; }
+[data-testid="stCaptionContainer"] { opacity: 1 !important; color: #abc3db !important; }
+[data-testid="stMarkdownContainer"] blockquote { opacity: 1 !important; color: #c1d3e6 !important; border-left-color: #547da3 !important; }
+.stApp [data-testid="stMarkdownContainer"] a { color: #9accff; }
 
-.astrea-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 2px 0 21px;
-  margin-bottom: 24px;
-  border-bottom: 1px solid #ccdef0;
-}
-.astrea-header h1 { margin: 0; padding: 0; font-size: 19px; line-height: 1.4; font-weight: 650; color: var(--astrea-ink); }
-.astrea-header p { margin: 4px 0 0; color: var(--astrea-muted); font-size: 12px; }
-.astrea-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 11px;
-  font-size: 12px;
-  border-radius: 99px;
-  background: var(--astrea-panel);
-  border: 1px solid var(--astrea-line);
-  box-shadow: 0 3px 10px #14385d08;
-}
-.astrea-status > span { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.astrea-status.is-ready { color: #237b59; }
-.astrea-status.is-pending { color: #916b18; background: #fff8e7; border-color: #eddfb9; }
+/* Cabecera del espacio de soporte. */
+.astrea-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 0 0 16px; margin: 0 0 12px; border-bottom: 1px solid #ffffff14; }
+.astrea-header h1 { margin: 0; padding: 0; font-size: 15px; line-height: 1.4; font-weight: 700; color: var(--astrea-ink); }
+.astrea-header p { color: var(--astrea-muted); margin: 5px 0 0; font-size: 12px; line-height: 1.5; }
+.astrea-status { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; padding: 8px 12px; font-size: 12px; color: #95c9ff; border: 1px solid #45688b55; border-radius: 99px; background: #142b41c9; box-shadow: 0 5px 12px #06111f22; }
+.astrea-status img { display: block; width: 16px; height: 16px; }
+.astrea-status.is-pending { color: #e6c288; border-color: #a57b3b60; background: #3b3026; }
 
-/* El sidebar nativo conserva su control de apertura en móviles. */
-[data-testid="stSidebar"] {
-  background: linear-gradient(160deg, #173e6b, #102d50 58%, #0c2441);
-  color: #e8f1ff;
-  border-right: 1px solid #153858;
-}
-[data-testid="stSidebar"] [data-testid="stSidebarContent"] { padding-top: .4rem; }
-[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] { padding-top: .7rem; }
+/* El panel conserva su apertura y cierre nativos. */
+[data-testid="stSidebar"] { background: linear-gradient(155deg, #183f6a 0, #123255 50%, #0e2948 100%); border-right: 1px solid #244461; color: var(--astrea-muted); overflow: hidden; }
+[data-testid="stSidebarContent"] { position: relative; z-index: 1; }
+[data-testid="stSidebarUserContent"] { padding: .6rem .85rem 1.3rem; }
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: .7rem; }
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
 [data-testid="stSidebar"] [data-testid="stWidgetLabel"],
-[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
-[data-testid="stSidebar"] [data-testid="stExpander"] summary { color: #c3d7ee; }
-[data-testid="stSidebar"] [data-testid="stExpander"] { border-color: #ffffff26; border-radius: 13px; }
-[data-testid="stSidebar"] [data-testid="stAlert"] { color: #1c3553; }
-[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] button { color: #d6e7fa; }
-[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] [data-testid="stIconMaterial"] { color: #d6e7fa; }
-.astrea-brand { display: flex; align-items: center; gap: 11px; margin: 5px 0 27px; }
-.astrea-brand-mark {
-  display: grid;
-  place-items: center;
-  width: 39px;
-  height: 41px;
-  flex: 0 0 auto;
-  color: #fff;
-  font-size: 24px;
-  font-weight: 700;
-  border-radius: 12px;
-  border: 1px solid #ffffff40;
-  background: linear-gradient(145deg, #4b96d3, #2163a3);
-  box-shadow: 0 5px 16px #00182c38, inset 0 1px 0 #ffffff30;
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] { color: #b5cce3; }
+.astrea-brand { display: flex; align-items: center; gap: 9px; margin: 0 0 25px; }
+.astrea-brand-mark { display: grid; place-items: center; flex: 0 0 auto; width: 35px; height: 37px; border-radius: 11px; border: 1px solid #80b9ed70; color: #fff; font-size: 25px; font-weight: 600; background: linear-gradient(140deg, #5aabeb, #2369a9 75%); box-shadow: inset 0 1px 0 #d8efff30, 0 5px 12px #06152a25; }
+.astrea-brand-name { color: #f4f8fe; font-size: 26px; line-height: 1.1; font-weight: 700; letter-spacing: -.9px; }
+.astrea-brand-description { color: #a9cae8; font-size: 12px; line-height: 1.5; margin-top: 5px; }
+.astrea-menu-label { margin: 25px 12px 7px; color: #87aecf; font-size: 10px; font-weight: 700; letter-spacing: 1.5px; }
+.astrea-sidebar-footer { display: flex; align-items: center; gap: 10px; margin-top: 35px; padding: 18px 10px 0; border-top: 1px solid #ffffff16; color: #e5f1ff; font-size: 12px; font-weight: 700; }
+.astrea-sidebar-footer span { display: block; color: #98b8d6; font-size: 12px; font-weight: 400; margin-top: 4px; }
+.astrea-footer-mark { display: grid; place-items: center; flex: 0 0 auto; width: 29px; height: 29px; border: 1px solid #365876; border-radius: 8px; color: #a8d5ff; font-size: 15px; }
+
+/* Botones y navegación, con foco visible para teclado. */
+.stButton > button, [data-testid="stFormSubmitButton"] > button { min-height: 42px; border: 1px solid var(--astrea-line); border-radius: 11px; background: var(--astrea-panel); color: var(--astrea-ink); padding: .6rem .9rem; transition: background 180ms ease, border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease; }
+.stButton > button:hover, [data-testid="stFormSubmitButton"] > button:hover { color: #fff; border-color: #5480aa; background: var(--astrea-panel-hover); }
+.stButton > button:focus-visible, [data-testid="stFormSubmitButton"] > button:focus-visible { outline: 3px solid #90c4fa; outline-offset: 3px; }
+.stButton > button p, .stButton > button [data-testid="stMarkdownContainer"] { color: inherit; }
+.stButton > button[kind="primary"], [data-testid="stFormSubmitButton"] > button[kind="primary"] { background: #276fb2; border-color: #3785cb; color: #fff; }
+.stButton > button:disabled { opacity: .55; transform: none; box-shadow: none; }
+[data-testid="stSidebar"] .stButton > button { justify-content: flex-start; border-color: transparent; background: transparent; color: #b8d1e8; text-align: left; font-size: 14px; }
+[data-testid="stSidebar"] .stButton > button:hover { background: #ffffff0b; border-color: #ffffff12; color: #f2f8ff; }
+[data-testid="stSidebar"] .stButton > button[kind="primary"] { background: #eff6ff; border-color: #d2e4f6; color: #244f76; }
+[data-testid="stSidebar"] .stButton > button p,
+[data-testid="stSidebar"] .stButton > button [data-testid="stMarkdownContainer"] { color: inherit; }
+.st-key-astrea_new_chat_area { margin-bottom: 16px; }
+[data-testid="stSidebar"] .st-key-astrea_new_chat_area .stButton > button { min-height: 48px; justify-content: center; background: linear-gradient(105deg, #3186d3, #2465ad); border: 1px solid #488fd0; color: #fff; box-shadow: 0 6px 14px #04182b26; font-weight: 600; }
+[data-testid="stSidebar"] .st-key-astrea_new_chat_area .stButton > button:hover { background: linear-gradient(105deg, #3b91dd, #2a70bc); }
+.st-key-astrea_nav_chat .stButton > button, .st-key-astrea_nav_solutions .stButton > button { min-height: 48px; }
+.st-key-astrea_nav_chat .stButton > button::before, .st-key-astrea_nav_solutions .stButton > button::before,
+[class*="st-key-astrea_sidebar_topic_"] .stButton > button::before { content: ""; flex: 0 0 auto; width: 18px; height: 20px; margin-right: 8px; background-image: var(--astrea-card-icon); background-position: center; background-repeat: no-repeat; background-size: 18px; }
+[class*="st-key-astrea_sidebar_topic_"] .stButton > button { min-height: 38px; padding: .4rem .7rem; }
+[class*="st-key-astrea_sidebar_topic_"] .stButton > button p { font-size: 13px; }
+:is([class*="st-key-astrea_topic_card_"], .st-key-astrea_nav_chat, .st-key-astrea_nav_solutions, [class*="st-key-astrea_sidebar_topic_"]) .stButton > button > div { flex: 1; min-width: 0; justify-content: flex-start !important; text-align: left; }
+:is([class*="st-key-astrea_topic_card_"], .st-key-astrea_nav_chat, .st-key-astrea_nav_solutions, [class*="st-key-astrea_sidebar_topic_"]) .stButton > button > div > span { justify-content: flex-start !important; text-align: left; }
+
+/* Bienvenida y tarjetas compactas: todo el botón abre la ficha. */
+.astrea-welcome { max-width: 600px; text-align: center; margin: 10px auto 24px; }
+.astrea-welcome-mark { position: relative; display: grid; place-items: center; margin: 0 auto 25px; width: 54px; height: 56px; border-radius: 18px; border: 1px solid #71ade0; background: linear-gradient(135deg, #4b9ddd, #1c61a0 75%); color: #eef8ff; box-shadow: inset 0 1px 0 #c2e7ff55, 0 12px 25px #020f2150; transform: rotate(-7deg); animation: astrea-float 5.5s ease-in-out infinite; }
+.astrea-welcome-mark::before { content: ""; position: absolute; inset: -7px; border: 1px solid #6b91b650; border-radius: 23px; }
+.astrea-welcome-mark img { width: 25px; height: 25px; transform: rotate(7deg); }
+.astrea-welcome > p { margin: 0 0 12px; color: #8dc6ff; font-size: 14px; font-weight: 600; }
+.astrea-welcome h2 { margin: 0 0 13px; padding: 0; color: #edf4fe; font-size: clamp(27px, 3.1vw, 34px); line-height: 1.2; font-weight: 700; letter-spacing: -1.2px; }
+.astrea-welcome h2 span { color: #8fc8ff; }
+.astrea-welcome > div:last-child { max-width: 560px; margin: 0 auto; color: var(--astrea-muted); font-size: 14px; line-height: 1.6; }
+[class*="st-key-astrea_topic_card_"] { background: transparent; border: 0; padding: 0; animation: astrea-card-in 320ms ease-out backwards; }
+.st-key-astrea_topic_card_1 { animation-delay: 45ms; }
+.st-key-astrea_topic_card_2 { animation-delay: 90ms; }
+.st-key-astrea_topic_card_3 { animation-delay: 135ms; }
+[class*="st-key-astrea_topic_card_"] .stButton > button { display: flex; justify-content: flex-start; align-items: center; gap: 11px; width: 100%; min-height: 88px; padding: 15px 13px; border: 1px solid #354c647d; border-radius: 19px; background: #192b3de8; box-shadow: 0 9px 18px #030d1d28; text-align: left; color: #adc6dd; }
+[class*="st-key-astrea_topic_card_"] .stButton > button::before { content: ""; display: block; flex: 0 0 auto; width: 36px; height: 40px; border: 1px solid #40638670; border-radius: 11px; background: var(--astrea-card-icon) center / 19px 19px no-repeat, #203d59; }
+[class*="st-key-astrea_topic_card_"] .stButton > button [data-testid="stMarkdownContainer"] { text-align: left; min-width: 0; }
+[class*="st-key-astrea_topic_card_"] .stButton > button p { color: #adc6dd; font-size: 12px; line-height: 1.6; margin: 0; }
+[class*="st-key-astrea_topic_card_"] .stButton > button strong { display: block; margin: 0 0 3px; color: #f0f5fc; font-size: 14px; line-height: 1.35; font-weight: 600; }
+[class*="st-key-astrea_topic_card_"] .stButton > button br { display: none; }
+[class*="st-key-astrea_topic_card_"] .stButton > button:hover { transform: translateY(-4px); border-color: #608db7; background: #21374de8; box-shadow: 0 14px 23px #020c1d45; }
+.astrea-welcome-hint { margin: 20px 0 28px; color: #abc4da; text-align: center; font-size: 12px; line-height: 1.6; }
+
+/* Compositor amplio, siempre oscuro aunque el navegador use otro tema. */
+[data-testid="stChatInput"] { position: relative; min-height: 128px; background: #192b3d !important; border: 1px solid #405975 !important; border-radius: 21px !important; color: var(--astrea-ink); padding: 12px 16px 40px; box-shadow: 0 11px 25px #030c1b30; }
+[data-testid="stChatInput"]:focus-within { border-color: #75a7d5 !important; box-shadow: 0 0 0 2px #367db826, 0 12px 26px #030c1b45; }
+[data-testid="stChatInput"] > div,
+[data-testid="stChatInput"] [data-baseweb="textarea"],
+[data-testid="stChatInput"] [data-baseweb="base-input"],
+[data-testid="stChatInput"] [data-baseweb="input"] { background: transparent !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
+[data-testid="stChatInput"] div { position: static !important; }
+[data-testid="stChatInput"] > div { padding: 0 !important; }
+[data-testid="stChatInput"] textarea { background: transparent !important; color: #e8f2ff !important; caret-color: #a5d3ff; border: 0 !important; box-shadow: none !important; outline: none; min-height: 48px !important; font-family: inherit; font-size: 14px; line-height: 1.65; padding: 4px 2px !important; }
+[data-testid="stChatInput"] textarea::placeholder { color: #adc6de !important; opacity: 1; }
+[data-testid="stChatInput"]::after { content: "↵  Enter para enviar"; position: absolute; left: 18px; bottom: 18px; pointer-events: none; color: #abc5de; font-size: 11px; line-height: 1.4; }
+[data-testid="stChatInputSubmitButton"] { position: absolute; right: 12px; bottom: 11px; width: 86px; min-height: 35px; padding: 7px 10px; gap: 5px; border: 1px solid #2f6b9e !important; border-radius: 11px; background: #205b92 !important; color: #d9edff !important; }
+[data-testid="stChatInputSubmitButton"]::before { content: "Enviar"; font-size: 12px; }
+[data-testid="stChatInputSubmitButton"]:disabled { opacity: .48; }
+[data-testid="stChatInputSubmitButton"] svg { width: 15px; height: 15px; color: inherit; }
+[data-testid="stBottomBlockContainer"], [data-testid="stBottom"] { background: #0b1726 !important; }
+[data-testid="stBottomBlockContainer"] { max-width: 870px; padding: 1rem 28px .8rem !important; }
+.astrea-footer, .astrea-composer-footer { text-align: center; color: #96b3ce; font-size: 11px; line-height: 1.6; margin: 12px 0 0; }
+
+/* Conversación, documentación y formularios. */
+[data-testid="stChatMessage"] { background: #172a3c; border: 1px solid #334b62; border-radius: 7px 18px 18px 18px; padding: 1.1rem; margin-bottom: .8rem; color: var(--astrea-ink); overflow-wrap: anywhere; box-shadow: 0 6px 16px #030c1b22; }
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { background: #17395a; border-color: #315878; border-radius: 18px 18px 5px 18px; }
+[data-testid="stChatMessageAvatarUser"] { background: #305779 !important; color: #e3f2ff !important; }
+[data-testid="stChatMessageAvatarAssistant"] { background: #286ea9 !important; color: #fff !important; }
+.astrea-message-name { color: #93c9ff; font-size: 12px; font-weight: 600; margin: 0 0 8px; }
+[data-testid="stExpander"] { background: #13263b; border: 1px solid #34516c !important; border-radius: 12px !important; color: #c5d9ed; }
+[data-testid="stExpander"] summary { color: #c5d9ed !important; font-size: 13px; }
+[data-testid="stSidebar"] [data-testid="stExpander"] { background: #0f2c49a6; border-color: #42618166 !important; margin-top: 15px; }
+[data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea { background: #172a3d !important; color: #eaf4ff !important; caret-color: #a5d3ff; }
+[data-testid="stTextInput"] [data-baseweb="input"], [data-testid="stTextInput"] [data-baseweb="base-input"],
+[data-testid="stTextArea"] [data-baseweb="textarea"], [data-testid="stSelectbox"] [data-baseweb="select"] > div { background: #172a3d !important; color: #eaf4ff !important; border-color: #405a74 !important; border-radius: 11px; }
+[data-testid="stTextInput"] input::placeholder, [data-testid="stTextArea"] textarea::placeholder { color: #94afca; opacity: 1; }
+[data-testid="stSelectbox"] svg { fill: #aac9e5; }
+[data-testid="stSelectbox"] [role="group"] { background: #172a3d !important; color: #eaf4ff !important; border-color: #405a74 !important; border-radius: 11px; }
+[data-testid="stSelectbox"] input[role="combobox"] { background: transparent !important; color: #eaf4ff !important; }
+[data-testid="stSelectbox"] button[aria-label="Open"] { background: transparent !important; color: #aac9e5 !important; }
+[data-testid="stSelectboxVirtualDropdown"], [data-testid="stSelectboxVirtualDropdown"] [role="listbox"] { background: #172a3d !important; color: #eaf4ff !important; }
+[data-testid="stSelectboxVirtualDropdown"] [role="option"] { color: #eaf4ff !important; }
+[data-testid="stSelectboxVirtualDropdown"] [role="option"][aria-selected="true"], [data-testid="stSelectboxVirtualDropdown"] [role="option"][data-focused] { background: #244969 !important; }
+[data-baseweb="popover"] [role="listbox"], [data-baseweb="popover"] [role="option"] { background: #162d43; color: #e5f1ff; }
+[data-baseweb="popover"] [role="option"]:hover, [data-baseweb="popover"] [aria-selected="true"] { background: #244969; }
+[data-testid="stCode"] pre, [data-testid="stCode"] code { background: #0d1c2c !important; color: #d6e7f8 !important; }
+[data-testid="stCode"] { border: 1px solid #2d455d; border-radius: 10px; }
+[data-testid="stDialog"] [role="dialog"] { background: #102237 !important; color: #eef6ff !important; border: 1px solid #426181; border-radius: 23px; box-shadow: 0 25px 80px #0009; animation: astrea-card-in 180ms ease-out; }
+[data-testid="stDialog"] [data-testid="stWidgetLabel"], [data-testid="stDialog"] h2 { color: #edf5ff !important; }
+[data-testid="stDialog"] [data-testid="stCaptionContainer"] { color: #abc3db; }
+[data-testid="stDialog"] button[aria-label="Close"] { color: #c4d9ef; }
+.astrea-topic-heading { margin-bottom: 13px; color: #edf5ff; font-size: 22px; font-weight: 600; }
+.astrea-page-intro { margin: 0 0 19px; }
+.astrea-page-intro h2 { margin: 0 0 8px; padding: 0; font-size: 27px; color: #edf4fc; letter-spacing: -.8px; }
+.astrea-page-intro p { margin: 0; color: #aac1d8; font-size: 14px; }
+.astrea-category { display: inline-block; margin-bottom: 7px; padding: 5px 9px; border: 1px solid #355d80; border-radius: 8px; background: #1a3b5a; color: #a5d0fa; font-size: 11px; font-weight: 600; }
+.astrea-detail-title { margin: 3px 0 17px; padding: 0; color: #edf5ff; font-size: 22px; line-height: 1.4; }
+[class*="st-key-astrea_faq_"] { background: #14283b; border-color: #334d66; border-radius: 17px; }
+.st-key-astrea_latest_response { animation: astrea-message-in 240ms ease-out; }
+@keyframes astrea-message-in { from { opacity: .4; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes astrea-card-in { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes astrea-float { 0%, 100% { transform: translateY(0) rotate(-7deg); } 50% { transform: translateY(-5px) rotate(-4deg); } }
+
+@media (min-width: 761px) {
+  .stApp .stMain { height: calc(100dvh - 34px) !important; max-height: calc(100dvh - 34px); min-height: 0; }
+  [data-testid="stAppViewContainer"] { position: absolute; inset: 16px; width: auto; height: auto; max-width: 1120px; margin: 0 auto; border: 1px solid #293e53; border-radius: 28px; overflow: hidden; box-shadow: 0 18px 45px #0003; }
+  [data-testid="stSidebar"] { width: 244px !important; min-width: 244px !important; max-width: 244px !important; height: calc(100% - 20px); margin: 10px 0 10px 10px; border-radius: 20px; border-right: 0; }
+  [data-testid="stSidebarHeader"] { display: none; }
+  [data-testid="stSidebarContent"] { height: 100%; padding: 20px 14px 16px !important; overflow-y: auto; box-sizing: border-box; }
+  [data-testid="stSidebarUserContent"] { margin: 0 !important; padding: 0 !important; }
+  [data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"] { min-height: calc(100dvh - 90px); }
+  [data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(> .st-key-astrea_sidebar_footer) { margin-top: auto; }
+  .st-key-astrea_sidebar_footer { margin-top: auto; }
+  .astrea-sidebar-footer { margin-top: 0; }
+  [data-testid="stSidebar"]::after { content: ""; position: absolute; right: -160px; bottom: 55px; width: 330px; height: 330px; border: 28px solid #25517913; border-radius: 50%; pointer-events: none; }
 }
-.astrea-brand-name { color: #f6faff; font-size: 29px; font-weight: 700; line-height: 1.1; letter-spacing: -1px; }
-.astrea-brand-description { color: #b6cfe8; margin-top: 4px; font-size: 12px; }
-.astrea-menu-label { color: #92b1d0; font-size: 11px; font-weight: 600; letter-spacing: 1px; margin: 22px 0 8px; }
-.astrea-sidebar-note { padding: 16px; margin: 25px 0 19px; background: #ffffff09; border: 1px solid #ffffff15; border-radius: 13px; }
-.astrea-sidebar-note strong { color: #e4effd; font-size: 13px; font-weight: 500; }
-.astrea-sidebar-note p { color: #a8bfd8; font-size: 12px; line-height: 1.6; margin: 5px 0 0; }
-.astrea-sidebar-footer { color: #ddeafa; font-size: 14px; font-weight: 600; margin-top: 25px; padding-top: 18px; border-top: 1px solid #ffffff1c; }
-.astrea-sidebar-footer span { display: block; font-size: 11px; font-weight: 400; color: #96b3d0; margin-top: 3px; }
-
-.stButton > button {
-  min-height: 43px;
-  border: 1px solid var(--astrea-line);
-  background: var(--astrea-panel);
-  color: var(--astrea-ink);
-  border-radius: 11px;
-  padding: .6rem .9rem;
-  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
-}
-.stButton > button:hover { border-color: #8eb6de; transform: translateY(-2px); box-shadow: 0 7px 15px #153d6c14; color: #1c548e; }
-.stButton > button:focus-visible { outline: 3px solid #75a9d6; outline-offset: 3px; }
-.stButton > button[kind="primary"] { background: #205f9e; border-color: #205f9e; color: #ffffff; }
-.stButton > button[kind="primary"] p { color: inherit; }
-.stButton > button:disabled { transform: none; box-shadow: none; }
-[data-testid="stSidebar"] .stButton > button { background: #ffffff08; border-color: #ffffff19; color: #d5e4f6; text-align: left; }
-[data-testid="stSidebar"] .stButton > button [data-testid="stMarkdownContainer"],
-[data-testid="stSidebar"] .stButton > button p { color: inherit; }
-[data-testid="stSidebar"] .stButton > button:hover { background: #ffffff12; border-color: #ffffff30; color: #ffffff; }
-[data-testid="stSidebar"] .stButton > button[kind="primary"] { background: #edf5ff; border-color: #edf5ff; color: #1e4d7d; }
-[data-testid="stSidebar"] .stButton > button[kind="primary"] [data-testid="stMarkdownContainer"],
-[data-testid="stSidebar"] .stButton > button[kind="primary"] p { color: #1e4d7d; }
-[data-testid="stSidebar"] .st-key-astrea_new_chat_area .stButton > button[kind="primary"] { background: linear-gradient(115deg,#2e79c8,#2165af); color: #ffffff; border-color: #4587c7; box-shadow: 0 5px 13px #001c3a40; }
-[data-testid="stSidebar"] .st-key-astrea_new_chat_area .stButton > button[kind="primary"] [data-testid="stMarkdownContainer"],
-[data-testid="stSidebar"] .st-key-astrea_new_chat_area .stButton > button[kind="primary"] p { color: #ffffff; }
-
-.astrea-welcome { text-align: center; max-width: 670px; margin: 2rem auto 1.7rem; }
-.astrea-welcome-mark {
-  display: grid; place-items: center;
-  margin: 0 auto 20px;
-  width: 50px; height: 52px;
-  border-radius: 16px;
-  color: #fff; font-size: 29px; font-weight: 600;
-  background: linear-gradient(145deg,#559fdd,#1c5fa1 65%,#154a83);
-  border: 1px solid #75a9d6;
-  box-shadow: 0 12px 25px #326b9e25, inset 0 1px 0 #ffffff66;
-  transform: rotate(-6deg);
-  animation: astrea-float 5s ease-in-out infinite;
-}
-.astrea-welcome > p { font-size: 14px; font-weight: 500; color: var(--astrea-blue); margin: 0 0 9px; }
-.astrea-welcome h2 { color: var(--astrea-ink); font-size: clamp(27px,3.7vw,39px); line-height: 1.2; font-weight: 650; letter-spacing: -1.3px; margin: 0 0 13px; padding: 0; }
-.astrea-welcome h2 span { color: var(--astrea-blue); }
-.astrea-welcome > div:last-child { color: var(--astrea-muted); font-size: 14px; line-height: 1.6; }
-.astrea-welcome-hint { text-align: center; font-size: 12px; color: var(--astrea-muted); margin: 13px 0 20px; }
-[class*="st-key-astrea_topic_card_"] {
-  background: var(--astrea-panel);
-  border-color: var(--astrea-line);
-  border-radius: 18px;
-  box-shadow: 0 8px 22px #153c6610;
-  transition: transform 220ms ease, box-shadow 220ms ease;
-  animation: astrea-card-in 360ms ease-out backwards;
-}
-.st-key-astrea_topic_card_1 { animation-delay: 50ms; }
-.st-key-astrea_topic_card_2 { animation-delay: 100ms; }
-.st-key-astrea_topic_card_3 { animation-delay: 150ms; }
-[class*="st-key-astrea_topic_card_"]:hover { transform: translateY(-5px); box-shadow: 0 15px 29px #163e6b1a; }
-.astrea-topic-card { display: flex; align-items: center; gap: 12px; padding: 3px 0 5px; }
-.astrea-topic-icon {
-  display: grid; place-items: center;
-  flex: 0 0 auto; width: 40px; height: 42px;
-  border-radius: 12px; border: 1px solid #dbeafa;
-  background: #edf5ff; color: #2668b0;
-  font-size: 18px; font-weight: 600;
-}
-.astrea-topic-icon svg { display: block; width: 22px; height: 22px; }
-.astrea-topic-card strong { font-size: 15px; color: var(--astrea-ink); font-weight: 600; }
-.astrea-topic-card p { font-size: 12px; color: var(--astrea-muted); margin: 3px 0 0; }
-[class*="st-key-astrea_topic_card_"] .stButton > button { color: #28649f; background: #f6faff; border-color: #e0ebf7; }
-.astrea-topic-heading { color: var(--astrea-ink); font-size: 23px; font-weight: 600; margin-bottom: 12px; letter-spacing: -.4px; }
-
-/* El diálogo y sus controles conservan el foco y el cierre nativos. */
-[data-testid="stDialog"] [role="dialog"] { border-radius: 22px; border: 1px solid #dce7f3; box-shadow: 0 25px 70px #08244835; background: var(--astrea-panel); color: var(--astrea-ink); animation: astrea-card-in 180ms ease-out; }
-[data-testid="stDialog"] [data-testid="stMarkdownContainer"],
-[data-testid="stDialog"] [data-testid="stWidgetLabel"] { color: var(--astrea-ink); }
-
-[data-testid="stChatMessage"] { border: 1px solid var(--astrea-line); background: var(--astrea-panel); border-radius: 7px 18px 18px 18px; padding: 1.15rem; margin-bottom: .8rem; box-shadow: 0 7px 20px #143b6310; overflow-wrap: anywhere; }
-[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { background: #e5effb; border-color: #d6e4f4; border-radius: 17px 17px 5px 17px; }
-.stMain [data-testid="stChatMessageAvatarUser"] { background-color: #d2e3f8; color: #255d95; }
-.stMain [data-testid="stChatMessageAvatarAssistant"] { background-color: #205f9e; color: #ffffff; }
-.stMain [data-testid="stChatMessageAvatarUser"] svg,
-.stMain [data-testid="stChatMessageAvatarAssistant"] svg { color: inherit; fill: currentColor; }
-.astrea-message-name { font-weight: 600; color: var(--astrea-blue); font-size: 13px; margin-bottom: 7px; }
-[data-testid="stChatMessage"] [data-testid="stExpander"] { background: #f7faff; border-color: #e2eaf3; border-radius: 10px; }
-[data-testid="stChatInput"] { background: var(--astrea-panel); border: 1px solid #c9dcef; border-radius: 18px; box-shadow: 0 10px 25px #173f6e12; }
-[data-testid="stChatInput"]:focus-within { border-color: #73a4d3; box-shadow: 0 12px 28px #173f6e20; }
-[data-testid="stChatInput"] textarea { background: var(--astrea-panel); color: var(--astrea-ink); font-size: 16px; }
-[data-testid="stChatInput"] textarea::placeholder { color: #657e98; opacity: 1; }
-[data-testid="stBottomBlockContainer"] { background: transparent; padding-top: 1rem; }
-.st-key-astrea_latest_response { animation: astrea-message-in 260ms ease-out; }
-@keyframes astrea-message-in { from { opacity: .4; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes astrea-card-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes astrea-float { 0%, 100% { transform: translateY(0) rotate(-6deg); } 50% { transform: translateY(-6px) rotate(-3deg); } }
-
-.astrea-page-intro { margin: 2px 0 20px; }
-.astrea-page-intro h2 { font-size: 28px; font-weight: 600; letter-spacing: -.7px; margin: 0 0 6px; padding: 0; color: var(--astrea-ink); }
-.astrea-page-intro p { color: var(--astrea-muted); font-size: 14px; margin: 0; }
-.astrea-category { display: inline-block; font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 7px; background: #eaf3fe; color: #2b659f; margin-bottom: 5px; }
-.astrea-detail-title { font-size: 22px; font-weight: 600; line-height: 1.45; margin: 5px 0 16px; padding: 0; color: var(--astrea-ink); }
-[class*="st-key-astrea_faq_"] { border-radius: 16px; background: var(--astrea-panel); border-color: var(--astrea-line); box-shadow: 0 6px 16px #12355509; }
-[data-testid="stTextInput"] input { color: var(--astrea-ink); background: var(--astrea-panel); }
-[data-testid="stSelectbox"] [data-baseweb="select"] > div { color: var(--astrea-ink); background: var(--astrea-panel); border-color: var(--astrea-line); border-radius: 10px; }
-
 @media (max-width: 760px) {
-  .stApp [data-testid="stMainBlockContainer"], .stApp .main .block-container { padding: calc(60px + 1.5rem) 1rem 6rem; }
-  .astrea-header { margin-bottom: 17px; padding-bottom: 17px; gap: 10px; }
-  .astrea-header h1 { font-size: 17px; }
-  .astrea-welcome { margin-top: 1.2rem; }
-  .astrea-welcome h2 { letter-spacing: -.8px; }
-  .astrea-topic-card strong { font-size: 14px; }
-  [data-testid="stChatMessage"] { padding: .8rem; }
+  [data-testid="stBottomBlockContainer"] { padding-left: 1rem !important; padding-right: 1rem !important; }
+  [data-testid="stAppViewContainer"] { inset: 0; margin: 0; width: 100%; max-width: none; border: 0; border-radius: 0; }
+  .stApp [data-testid="stMainBlockContainer"], .stApp .main .block-container { padding: 4rem 1rem 2rem; }
+  [data-testid="stHeader"] { background: #0e2035f5 !important; }
+  .astrea-header { margin-bottom: 22px; padding-bottom: 17px; gap: 10px; }
+  .astrea-header h1 { font-size: 15px; }
+  .astrea-header p { font-size: 11px; }
+  .astrea-status { font-size: 10px; padding: 7px 9px; }
+  .astrea-welcome { margin: .9rem auto 1.5rem; }
+  .astrea-welcome h2 { font-size: 29px; letter-spacing: -.9px; }
+  .astrea-welcome > div:last-child { font-size: 13px; }
+  .astrea-welcome-mark { width: 49px; height: 51px; }
+  .astrea-welcome-hint { margin: 14px 0 20px; }
+  [class*="st-key-astrea_topic_card_"] .stButton > button { min-height: 84px; }
+  [data-testid="stChatInput"] textarea { font-size: 16px; }
+  [data-testid="stChatMessage"] { padding: .85rem; }
   .astrea-detail-title { font-size: 20px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .stButton > button,
-  [class*="st-key-astrea_topic_card_"],
-  [data-testid="stDialog"] [role="dialog"],
-  .astrea-welcome-mark,
-  .st-key-astrea_latest_response { transition: none; animation: none; }
-  .stButton > button:hover,
-  [class*="st-key-astrea_topic_card_"]:hover { transform: none; }
+  .stButton > button, [class*="st-key-astrea_topic_card_"], .astrea-welcome-mark,
+  .st-key-astrea_latest_response, [data-testid="stDialog"] [role="dialog"] { transition: none; animation: none; }
+  [class*="st-key-astrea_topic_card_"] .stButton > button:hover { transform: none; }
 }
 </style>
 """)
@@ -311,20 +307,56 @@ def faq_preview(answer: str) -> str:
     return clean[:130].rstrip() + "…" if len(clean) > 130 else clean
 
 
-def category_icon(category: str) -> str:
-    """Iconos locales: no necesitan librerías ni peticiones externas."""
+def icon_data(category: str, color: str = "#a4c9ea") -> str:
+    """Iconos locales, compatibles con la sanitización de HTML de Streamlit."""
     icons = {
         "Facturación": '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 7h6M9 11h6M9 15h3"/>',
         "Inventario": '<path d="m12 3 9 5v8l-9 5-9-5V8l9-5Z"/><path d="m3 8 9 5 9-5M12 13v8M7.5 5.5l9 5"/>',
         "Cartera": '<rect x="3" y="5" width="18" height="15" rx="3"/><path d="M3 9h18M15 14h6"/><circle cx="16" cy="14" r=".5"/>',
         "Cajas y bancos": '<path d="m3 9 9-6 9 6H3ZM5 10v7M10 10v7M14 10v7M19 10v7M3 21h18M4 18h16"/>',
+        "sparkles": '<path d="m10 3 2.1 5.9L18 11l-5.9 2.1L10 19l-2.1-5.9L2 11l5.9-2.1L10 3ZM19 2l.9 2.1L22 5l-2.1.9L19 8l-.9-2.1L16 5l2.1-.9L19 2ZM19 15l1.2 2.8L23 19l-2.8 1.2L19 23l-1.2-2.8L15 19l2.8-1.2L19 15Z"/>',
+        "chat": '<path d="M4 3h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 1-2Z"/><path d="M9 17h7l5 4V10"/>',
+        "book": '<path d="M12 5v16M3 4h5a4 4 0 0 1 4 2 4 4 0 0 1 4-2h5v15h-5a4 4 0 0 0-4 2 4 4 0 0 0-4-2H3V4Z"/>',
     }
     paths = icons.get(category, '<path d="M4 4h7a3 3 0 0 1 3 3v14a4 4 0 0 0-4-2H4V4ZM14 7a3 3 0 0 1 3-3h3v15h-2a4 4 0 0 0-4 2"/>')
-    return (
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" '
+        f'fill="none" stroke="{color}" '
         'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" '
-        f'aria-hidden="true">{paths}</svg>'
+        f'>{paths}</svg>'
     )
+    return "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
+
+
+def icon_image(name: str, size: int = 22, color: str = "#a4c9ea") -> str:
+    return (
+        f'<img src="{icon_data(name, color)}" width="{size}" height="{size}" '
+        'alt="" aria-hidden="true">'
+    )
+
+
+def help_categories() -> list[str]:
+    available = {faq["category"] for faq in FAQS}
+    preferred = ("Facturación", "Inventario", "Cartera", "Cajas y bancos")
+    categories = [category for category in preferred if category in available]
+    categories.extend(sorted(available.difference(categories)))
+    return categories[:4]
+
+
+def render_icon_styles() -> None:
+    rules = []
+    for position, category in enumerate(help_categories()):
+        rules.append(
+            f'.st-key-astrea_topic_card_{position}, .st-key-astrea_sidebar_topic_{position}'
+            f'{{ --astrea-card-icon: url("{icon_data(category)}"); }}'
+        )
+    for key, name in (("astrea_nav_chat", "chat"), ("astrea_nav_solutions", "book")):
+        rules.append(f'.st-key-{key} {{ --astrea-card-icon: url("{icon_data(name)}"); }}')
+        rules.append(
+            f'.st-key-{key} button[kind="primary"]'
+            f'{{ --astrea-card-icon: url("{icon_data(name, "#315e87")}"); }}'
+        )
+    st.html("<style>" + "".join(rules) + "</style>")
 
 
 def safe_index_exists() -> bool:
@@ -411,28 +443,34 @@ def render_sidebar(index_ready: bool) -> int:
                 use_container_width=True,
                 on_click=new_chat,
             )
-        st.html('<p class="astrea-menu-label">TU ESPACIO DE AYUDA</p>')
-        st.button(
-            "Chat de soporte",
-            key="nav_chat",
-            type="primary" if st.session_state.main_view == "Chat" else "secondary",
-            use_container_width=True,
-            on_click=select_view,
-            args=("Chat",),
-        )
-        st.button(
-            "Soluciones rápidas",
-            key="nav_solutions",
-            type="primary" if st.session_state.main_view == "Soluciones rápidas" else "secondary",
-            use_container_width=True,
-            on_click=select_view,
-            args=("Soluciones rápidas",),
-        )
-        st.html(
-            '<div class="astrea-sidebar-note">'
-            '<strong>Las fuentes, a la mano.</strong>'
-            '<p>Consulta los documentos que acompañan cada respuesta.</p></div>'
-        )
+        with ui_container("astrea_nav_chat", border=False):
+            st.button(
+                "Chat de soporte",
+                key="nav_chat",
+                type="primary" if st.session_state.main_view == "Chat" else "secondary",
+                use_container_width=True,
+                on_click=select_view,
+                args=("Chat",),
+            )
+        with ui_container("astrea_nav_solutions", border=False):
+            st.button(
+                "Soluciones rápidas",
+                key="nav_solutions",
+                type="primary" if st.session_state.main_view == "Soluciones rápidas" else "secondary",
+                use_container_width=True,
+                on_click=select_view,
+                args=("Soluciones rápidas",),
+            )
+        st.html('<p class="astrea-menu-label">TEMAS DE AYUDA</p>')
+        for position, category in enumerate(help_categories()):
+            with ui_container(f"astrea_sidebar_topic_{position}", border=False):
+                st.button(
+                    display_text(category),
+                    key=f"astrea_sidebar_topic_button_{position}",
+                    use_container_width=True,
+                    on_click=show_category,
+                    args=(category,),
+                )
         with st.expander("Configuración de la base", expanded=False):
             st.caption("Índice disponible" if index_ready else "Índice pendiente")
             st.caption(f"Directorio de manuales: `{config.PDF_DIR}`")
@@ -467,22 +505,22 @@ def render_sidebar(index_ready: bool) -> int:
                 use_container_width=True,
                 on_click=new_chat,
             )
-        st.html(
-            '<div class="astrea-sidebar-footer">'
-            f'{escaped(UI_NAME)}<span>Centro de soporte</span></div>'
-        )
+        with ui_container("astrea_sidebar_footer", border=False):
+            st.html(
+                '<div class="astrea-sidebar-footer">'
+                '<div class="astrea-footer-mark" aria-hidden="true">A</div>'
+                f'<div>{escaped(UI_NAME).upper()}<span>Centro de soporte</span></div></div>'
+            )
     return top_k
 
 
 def render_header(index_ready: bool) -> None:
     is_chat = st.session_state.main_view == "Chat"
     title = "Centro de soporte" if is_chat else "Soluciones rápidas"
-    state_class = "is-ready" if index_ready else "is-pending"
-    state_label = "Índice disponible" if index_ready else "Índice pendiente"
     st.html(
         '<header class="astrea-header">'
         f'<div><h1>{title}</h1><p>Tu espacio de ayuda con {escaped(UI_NAME)}</p></div>'
-        f'<span class="astrea-status {state_class}"><span aria-hidden="true"></span>{state_label}</span>'
+        f'<span class="astrea-status">{icon_image("sparkles", 16)}Asistente virtual</span>'
         '</header>'
     )
 
@@ -528,21 +566,17 @@ if DIALOG_AVAILABLE:
 def render_welcome() -> None:
     st.html(
         '<section class="astrea-welcome">'
-        '<div class="astrea-welcome-mark" aria-hidden="true">A</div>'
+        f'<div class="astrea-welcome-mark" aria-hidden="true">{icon_image("sparkles", 25, "#e5f4ff")}</div>'
         f'<p>Hola, soy {escaped(UI_NAME)}.</p>'
         '<h2>¿Qué <span>resolvemos</span> hoy?</h2>'
-        '<div>Encuentra ayuda con pasos claros y fuentes a la mano.</div>'
+        '<div>Un espacio para tus preguntas. Encuentra ayuda con pasos claros y fuentes a la mano.</div>'
         '</section>'
     )
-    available = {faq["category"] for faq in FAQS}
-    preferred = ("Facturación", "Inventario", "Cartera", "Cajas y bancos")
-    categories = [category for category in preferred if category in available]
-    categories.extend(sorted(available.difference(categories)))
-    categories = categories[:4]
+    categories = help_categories()
     descriptions = {
         "Facturación": "Facturas y vencimientos",
         "Inventario": "Ayuda con tus productos",
-        "Cartera": "Consultas de este módulo",
+        "Cartera": "Consultas sobre este módulo",
         "Cajas y bancos": "Orientación paso a paso",
     }
     selected_topic = None
@@ -551,17 +585,9 @@ def render_welcome() -> None:
         for column, category in zip(columns, categories[row_start:row_start + 2]):
             position = categories.index(category)
             with column:
-                with ui_container(f"astrea_topic_card_{position}"):
-                    st.html(
-                        '<div class="astrea-topic-card">'
-                        f'<span class="astrea-topic-icon" aria-hidden="true">{category_icon(category)}</span>'
-                        '<div>'
-                        f'<strong>{escaped(category)}</strong>'
-                        f'<p>{escaped(descriptions.get(category, "Guías de soporte"))}</p>'
-                        '</div></div>'
-                    )
+                with ui_container(f"astrea_topic_card_{position}", border=False):
                     if st.button(
-                        f"Explorar {display_text(category)} →",
+                        f"**{display_text(category)}**  \n{descriptions.get(category, 'Guías de soporte')}",
                         key=f"astrea_open_{position}",
                         use_container_width=True,
                     ):
@@ -676,11 +702,15 @@ def render_chat(index_ready: bool, top_k: int) -> None:
     # En una conversación, el mismo componente nativo queda fijo al pie.
     input_context = ui_container("astrea_welcome_input", border=False) if show_welcome else nullcontext()
     with input_context:
+        input_options = {"height": 130} if "height" in inspect.signature(st.chat_input).parameters else {}
         typed_question = st.chat_input(
             "Escribe tu pregunta a Astrea…",
             key="astrea_chat_input",
             on_submit=queue_chat_question,
+            **input_options,
         )
+    if show_welcome:
+        st.html('<p class="astrea-footer">Soporte de Astrea · Consulta las fuentes de cada respuesta.</p>')
     question = pending_question or typed_question
     for index, message in enumerate(st.session_state.messages):
         render_message(message, index)
@@ -753,6 +783,7 @@ def render_solutions() -> None:
             )
 
 
+render_icon_styles()
 index_ready = safe_index_exists()
 top_k = render_sidebar(index_ready)
 render_header(index_ready)
@@ -763,3 +794,5 @@ if st.session_state.main_view == "Soluciones rápidas":
     render_solutions()
 else:
     render_chat(index_ready, top_k)
+
+# FIN DEL ARCHIVO APP.PY
