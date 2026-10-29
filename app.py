@@ -24,7 +24,7 @@ from src.rag_chain import (
 )
 
 st.set_page_config(
-    page_title=f"{config.ASSISTANT_NAME} | OficinaPro",
+    page_title=f"{config.ASSISTANT_NAME} | Astrea",
     page_icon="💬",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -526,7 +526,7 @@ st.html(
     f'<div class="op-brand">'
     f'<div class="op-logo">O</div>'
     f'<div>'
-    f'<div class="op-brand-name">OFICINA<span>PRO.CO</span></div>'
+    f'<div class="op-brand-name">Astrea<span>☺</span></div>'
     f'<div class="op-brand-subtitle">Asistente de soporte</div>'
     f'</div></div>'
     f'<div class="op-status">'
