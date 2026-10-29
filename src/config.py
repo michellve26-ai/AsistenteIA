@@ -83,9 +83,9 @@ TOP_K = 5
 # PERSONALIZACIÓN DEL ASISTENTE
 # ---------------------------------------------------------
 
-ASSISTANT_NAME = "Asistente de Soporte Técnico"
+ASSISTANT_NAME = "Astrea"
 
-EMPRESA = "OficinaPro.co"
+EMPRESA = "Astrea"
 
 
 # ---------------------------------------------------------
