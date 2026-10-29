@@ -1,125 +1,96 @@
-                llm = _get_llm()
-                prompt_template = get_prompt_template()
-                vector_store = _get_vectorstore(embeddings)
-                result = rag_pipeline(
-                    vector_store,
-                    llm,
-                    prompt_template,
-                    question,
-                    k=top_k,
-                    historial=st.session_state.messages[:-1],
-                )
-            answer["content"] = result["respuesta"]
-            details["sources"] = serialize_sources(result.get("fragmentos", []))
-        except Exception as exc:
-            answer["content"] = "No fue posible completar la consulta en este momento."
-            details["error"] = True
-            details["error_detail"] = str(exc)
-    # Las fuentes y los detalles visuales no se envían al modelo.
-    index = len(st.session_state.messages)
-    st.session_state.messages.append(answer)
-    st.session_state.astrea_message_details[index] = details
-    render_message(answer, index, new=True)
+"""Interfaz de Astrea. Ejecutar con: streamlit run app.py."""
+
+import html
+import inspect
+import re
+from contextlib import nullcontext
+
+import streamlit as st
+
+from src import config
+from src.faqs import FAQS
+from src.ingest import load_pdfs, split_documents
+from src.rag_chain import get_llm, get_prompt_template, rag_pipeline
+from src.vectorstore import (
+    build_vectorstore,
+    get_embeddings,
+    index_exists,
+    load_vectorstore,
+)
 
 
-def render_chat(index_ready: bool, top_k: int) -> None:
-    pending_question = st.session_state.pop("pending_question", None)
-    if not index_ready:
-        st.warning(
-            "La información de soporte está pendiente de indexación. "
-            "Las soluciones rápidas siguen disponibles."
-        )
-    show_welcome = not st.session_state.messages and not pending_question
-    if show_welcome:
-        render_welcome()
-    # Un formulario inline evita el auto-scroll de Streamlit en la bienvenida.
-    # En una conversación, el mismo componente nativo queda fijo al pie.
-    input_context = ui_container("astrea_welcome_input", border=False) if show_welcome else nullcontext()
-    with input_context:
-        typed_question = st.chat_input(
-            "Escribe tu pregunta a Astrea…",
-            key="astrea_chat_input",
-            on_submit=queue_chat_question,
-        )
-    question = pending_question or typed_question
-    for index, message in enumerate(st.session_state.messages):
-        render_message(message, index)
-    if question and question.strip():
-        answer_question(question, top_k, index_ready)
+UI_NAME = "Astrea"
 
+st.set_page_config(
+    page_title=UI_NAME,
+    page_icon="✨",
+    layout="wide",
+    initial_sidebar_state="auto",
+)
 
-def render_solutions() -> None:
-    st.html(
-        '<div class="astrea-page-intro"><h2>Encuentra una solución</h2>'
-        '<p>Consulta una guía o continúa tu pregunta en el chat.</p></div>'
-    )
-    search_col, category_col = st.columns([2, 1], gap="medium")
-    with search_col:
-        search = st.text_input(
-            "Buscar una solución",
-            placeholder="Factura, inventario, cartera…",
-            key="faq_search",
-        ).strip().casefold()
-    categories = ["Todas"] + sorted({faq["category"] for faq in FAQS})
-    with category_col:
-        category = st.selectbox(
-            "Categoría",
-            categories,
-            index=categories.index(st.session_state.faq_category) if st.session_state.faq_category in categories else 0,
-            key="faq_categories",
-        )
-    st.session_state.faq_category = category
-    matches = []
-    for index, faq in enumerate(FAQS):
-        searchable = display_text(" ".join(str(faq.get(field, "")) for field in ("question", "category", "keywords", "answer"))).casefold()
-        if (category == "Todas" or faq["category"] == category) and (not search or search in searchable):
-            matches.append((index, faq))
-    if not matches:
-        st.info("No encontré una solución rápida con ese término. Prueba otra palabra o categoría.")
-        return
-    visible_indices = [index for index, _ in matches]
-    if st.session_state.selected_faq not in visible_indices:
-        st.session_state.selected_faq = visible_indices[0]
-    list_col, detail_col = st.columns([1, 1.5], gap="large")
-    with list_col:
-        for index, faq in matches:
-            with ui_container(f"astrea_faq_{index}"):
-                st.html(f'<span class="astrea-category">{escaped(faq["category"])}</span>')
-                if st.button(
-                    display_text(faq["question"]),
-                    key=f"faq_select_{index}",
-                    type="primary" if index == st.session_state.selected_faq else "secondary",
-                    use_container_width=True,
-                ):
-                    st.session_state.selected_faq = index
-                    st.rerun()
-                st.caption(faq_preview(faq["answer"]))
-    with detail_col:
-        faq = FAQS[st.session_state.selected_faq]
-        with ui_container("astrea_faq_detail"):
-            st.html(
-                f'<span class="astrea-category">{escaped(faq["category"])}</span>'
-                f'<h2 class="astrea-detail-title">{escaped(faq["question"])}</h2>'
-            )
-            st.markdown(display_text(faq["answer"]))
-            st.caption(f"Fuente: {faq.get('source', 'Base de conocimiento')}")
-            st.button(
-                "Consultar este caso en el chat",
-                key="faq_to_chat",
-                type="primary",
-                use_container_width=True,
-                on_click=queue_faq,
-                args=(st.session_state.selected_faq,),
-            )
+st.html("""
+<style>
+/* Astrea: presentación de Streamlit. Las interacciones son componentes nativos. */
+.stApp {
+  --astrea-ink: #1c3553;
+  --astrea-muted: #5e748e;
+  --astrea-line: #dbe6f2;
+  --astrea-panel: #ffffff;
+  --astrea-soft: #f0f6fc;
+  --astrea-blue: #2365ad;
+  --astrea-navy: #123253;
+  color: var(--astrea-ink);
+  background: radial-gradient(ellipse at 92% 8%, #d9ecff 0, transparent 52%), #f1f5fb;
+}
 
+[data-testid="stHeader"] { background: #f1f5fbf0; }
+/* El botón móvil vive dentro del toolbar: solo ocultamos sus acciones técnicas. */
+[data-testid="stAppDeployButton"], [data-testid="stMainMenu"] { display: none; }
+.stApp [data-testid="stMainBlockContainer"], .stApp .main .block-container {
+  max-width: 1120px;
+  padding: calc(60px + 1.5rem) 2rem 6rem;
+}
+.stMain [data-testid="stMarkdownContainer"],
+.stMain [data-testid="stWidgetLabel"] { color: var(--astrea-ink); }
+.stMain [data-testid="stCaptionContainer"] { color: var(--astrea-muted); }
 
-index_ready = safe_index_exists()
-top_k = render_sidebar(index_ready)
-render_header(index_ready)
-notice = st.session_state.pop("astrea_notice", None)
-if notice:
-    st.success(notice)
-if st.session_state.main_view == "Soluciones rápidas":
-    render_solutions()
-else:
-    render_chat(index_ready, top_k)
+.astrea-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 2px 0 21px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid #ccdef0;
+}
+.astrea-header h1 { margin: 0; padding: 0; font-size: 19px; line-height: 1.4; font-weight: 650; color: var(--astrea-ink); }
+.astrea-header p { margin: 4px 0 0; color: var(--astrea-muted); font-size: 12px; }
+.astrea-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  font-size: 12px;
+  border-radius: 99px;
+  background: var(--astrea-panel);
+  border: 1px solid var(--astrea-line);
+  box-shadow: 0 3px 10px #14385d08;
+}
+.astrea-status > span { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.astrea-status.is-ready { color: #237b59; }
+.astrea-status.is-pending { color: #916b18; background: #fff8e7; border-color: #eddfb9; }
+
+/* El sidebar nativo conserva su control de apertura en móviles. */
+[data-testid="stSidebar"] {
+  background: linear-gradient(160deg, #173e6b, #102d50 58%, #0c2441);
+  color: #e8f1ff;
+  border-right: 1px solid #153858;
+}
+[data-testid="stSidebar"] [data-testid="stSidebarContent"] { padding-top: .4rem; }
+[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] { padding-top: .7rem; }
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"],
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+[data-testid="stSidebar"] [data-testid="stExpander"] summary { color: #c3d7ee; }
+[data-testid="stSidebar"] [data-testid="stExpander"] { border-color: #ffffff26; border-radius: 13px; }
