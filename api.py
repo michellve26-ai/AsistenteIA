@@ -1,12 +1,7 @@
-```python
 """
 Backend — Asistente de Soporte Técnico (RAG)
-
-Ejecutar con:
-    uvicorn api:app --reload
-
-Abrir luego:
-    http://127.0.0.1:8000
+Ejecutar con: uvicorn api:app --reload
+Abre luego: http://127.0.0.1:8000
 """
 
 import json
@@ -24,16 +19,8 @@ from src.vectorstore import (
     load_vectorstore,
     index_exists,
 )
-from src.rag_chain import (
-    get_llm,
-    get_prompt_template,
-    rag_pipeline,
-)
+from src.rag_chain import get_llm, get_prompt_template, rag_pipeline
 
-
-# =========================================================
-# CONFIGURACIÓN GENERAL
-# =========================================================
 
 app = FastAPI(title=config.ASSISTANT_NAME)
 
@@ -41,11 +28,8 @@ BASE_DIR = Path(__file__).resolve().parent
 FAQS_PATH = BASE_DIR / "data" / "faqs.json"
 
 
-# =========================================================
-# RECURSOS PESADOS
-# Se cargan una sola vez (lazy) y se reutilizan.
-# =========================================================
-
+# Recursos pesados: se cargan una sola vez (lazy)
+# y se reutilizan entre peticiones.
 _embeddings = None
 _llm = None
 _prompt_template = None
@@ -83,16 +67,10 @@ def _lazy_vectorstore():
     global _vector_store
 
     if _vector_store is None:
-        _vector_store = load_vectorstore(
-            _lazy_embeddings()
-        )
+        _vector_store = load_vectorstore(_lazy_embeddings())
 
     return _vector_store
 
-
-# =========================================================
-# MODELOS
-# =========================================================
 
 class ChatRequest(BaseModel):
     question: str
@@ -100,51 +78,46 @@ class ChatRequest(BaseModel):
 
 
 # =========================================================
-# FUNCIONES AUXILIARES
+# DETECCIÓN DE SALUDOS
 # =========================================================
 
 def es_saludo(texto: str) -> bool:
     """
-    Detecta saludos simples para responder directamente
-    sin consultar ChromaDB ni ejecutar el RAG.
+    Detecta saludos simples.
+
+    Los saludos se responden directamente y no pasan
+    por ChromaDB ni por el pipeline RAG.
     """
 
     texto = texto.lower().strip()
 
-    saludos = [
+    # Quitamos signos comunes al final.
+    texto = texto.rstrip("!?.,;:")
+
+    saludos = {
         "hola",
         "holaa",
         "holaaa",
         "buenas",
-        "buenos dias",
-        "buenos días",
-        "buen dia",
         "buen día",
+        "buen dia",
+        "buenos días",
+        "buenos dias",
         "buenas tardes",
         "buenas noches",
         "hey",
         "hello",
         "hi",
-        "que tal",
         "qué tal",
-        "como estas",
+        "que tal",
         "cómo estás",
-        "como estás",
+        "como estas",
         "cómo estas",
-    ]
+        "como estás",
+    }
 
-    return any(
-        texto == saludo
-        or texto.startswith(saludo + " ")
-        or texto.startswith(saludo + ",")
-        or texto.startswith(saludo + "!")
-        for saludo in saludos
-    )
+    return texto in saludos
 
-
-# =========================================================
-# ESTADO DEL SISTEMA
-# =========================================================
 
 @app.get("/api/status")
 def status():
@@ -155,13 +128,8 @@ def status():
     }
 
 
-# =========================================================
-# FAQS
-# =========================================================
-
 @app.get("/api/faqs")
 def get_faqs():
-
     if not FAQS_PATH.exists():
         return []
 
@@ -172,26 +140,18 @@ def get_faqs():
     )
 
 
-# =========================================================
-# INDEXACIÓN DE DOCUMENTOS
-# =========================================================
-
 @app.post("/api/index")
 def reindex():
     """
-    Reprocesa los PDF almacenados en data/pdfs
+    Reprocesa los PDF de data/pdfs
     y reconstruye la base vectorial.
     """
 
     global _vector_store
 
     try:
-
         documents = load_pdfs()
-
-        chunks = split_documents(
-            documents
-        )
+        chunks = split_documents(documents)
 
         build_vectorstore(
             chunks,
@@ -199,8 +159,7 @@ def reindex():
             rebuild=True,
         )
 
-        # Se fuerza a recargar la base vectorial
-        # en la próxima consulta.
+        # Se recarga en la próxima consulta.
         _vector_store = None
 
         return {
@@ -209,61 +168,48 @@ def reindex():
         }
 
     except FileNotFoundError as e:
-
         raise HTTPException(
             status_code=400,
             detail=str(e),
         )
 
 
-# =========================================================
-# CHAT
-# =========================================================
-
 @app.post("/api/chat")
 def chat(req: ChatRequest):
 
-    # -----------------------------------------------------
-    # 1. Validar que la pregunta no esté vacía
-    # -----------------------------------------------------
+    # =====================================================
+    # 1. Validar pregunta
+    # =====================================================
 
-    if not req.question.strip():
+    pregunta = req.question.strip()
 
+    if not pregunta:
         raise HTTPException(
             status_code=400,
             detail="La pregunta no puede estar vacía.",
         )
 
 
-    # -----------------------------------------------------
-    # 2. Detectar saludos
-    #
-    # Los saludos NO pasan por ChromaDB ni por el RAG.
-    # Esto evita búsquedas innecesarias en los manuales.
-    # -----------------------------------------------------
+    # =====================================================
+    # 2. RESPONDER SALUDOS
+    # =====================================================
 
-    if es_saludo(req.question):
-
+    if es_saludo(pregunta):
         return {
             "respuesta": (
-                "¡Hola! 👋 Soy AstreaS, tu asistente de soporte técnico. "
-                "Estoy aquí para ayudarte con tus dudas. "
+                "¡Hola! 👋 Soy Astrea, tu asistente virtual de soporte. "
+                "Estoy aquí para ayudarte con tus dudas sobre OficinaPro. "
                 "¿En qué puedo ayudarte hoy?"
             ),
             "fuentes": [],
         }
 
 
-    # -----------------------------------------------------
-    # 3. Verificar que exista la base vectorial
-    #
-    # Esta validación se realiza después del saludo
-    # para que AstreaS pueda saludar aunque todavía
-    # no existan documentos indexados.
-    # -----------------------------------------------------
+    # =====================================================
+    # 3. Verificar base vectorial
+    # =====================================================
 
     if not index_exists():
-
         raise HTTPException(
             status_code=400,
             detail=(
@@ -273,35 +219,32 @@ def chat(req: ChatRequest):
         )
 
 
-    # -----------------------------------------------------
-    # 4. Ejecutar pipeline RAG
-    # -----------------------------------------------------
+    # =====================================================
+    # 4. Ejecutar RAG
+    # =====================================================
 
     resultado = rag_pipeline(
         _lazy_vectorstore(),
         _lazy_llm(),
         _lazy_prompt_template(),
-        req.question,
+        pregunta,
         k=req.k,
     )
 
 
-    # -----------------------------------------------------
-    # 5. Preparar las fuentes utilizadas
-    # -----------------------------------------------------
+    # =====================================================
+    # 5. Fuentes
+    # =====================================================
 
     fuentes = [
         {
             "archivo": Path(
-                d.metadata.get(
-                    "source",
-                    "?",
-                )
+                d.metadata.get("source", "?")
             ).name,
 
             "pagina": d.metadata.get(
                 "page",
-                "?",
+                "?"
             ),
 
             "fragmento": d.page_content[:300],
@@ -310,10 +253,6 @@ def chat(req: ChatRequest):
         for d in resultado["fragmentos"]
     ]
 
-
-    # -----------------------------------------------------
-    # 6. Respuesta final
-    # -----------------------------------------------------
 
     return {
         "respuesta": resultado["respuesta"],
@@ -325,13 +264,8 @@ def chat(req: ChatRequest):
 # INTERFAZ ESTÁTICA
 # =========================================================
 
-# Sirve:
-# - index.html
-# - style.css
-# - app.js
-#
 # IMPORTANTE:
-# Debe montarse AL FINAL para no tapar las rutas /api/*.
+# Debe mantenerse AL FINAL para no tapar /api/*.
 
 app.mount(
     "/",
@@ -341,4 +275,3 @@ app.mount(
     ),
     name="static",
 )
-```
