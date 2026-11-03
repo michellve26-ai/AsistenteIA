@@ -5,7 +5,7 @@ Este módulo define las tools que el modelo de lenguaje puede
 invocar cuando una consulta necesita ejecutar una operación
 sobre recursos internos del asistente.
 
-Las tools complementan el RAG.
+Las tools complementan el sistema RAG:
 
 - El RAG recupera conocimiento semántico desde ChromaDB.
 - Las tools ejecutan funciones concretas y determinísticas.
@@ -26,12 +26,15 @@ from src.vectorstore import index_exists
 
 
 # =========================================================
-# RUTAS
+# RUTAS DEL PROYECTO
 # =========================================================
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# config.PDF_DIR ya está definido en src/config.py
+# con el valor por defecto "data/pdfs".
 PDF_DIR = BASE_DIR / config.PDF_DIR
+
 FAQS_PATH = BASE_DIR / "data" / "faqs.json"
 
 
@@ -43,8 +46,8 @@ def _cargar_faqs() -> list[dict[str, Any]]:
     """
     Lee y valida el archivo de preguntas frecuentes.
 
-    Esta función es interna y no está expuesta directamente
-    como tool al modelo.
+    Esta función es interna.
+    No se expone directamente como tool al modelo.
     """
 
     if not FAQS_PATH.exists():
@@ -60,7 +63,11 @@ def _cargar_faqs() -> list[dict[str, Any]]:
         if not isinstance(datos, list):
             return []
 
-        return datos
+        return [
+            item
+            for item in datos
+            if isinstance(item, dict)
+        ]
 
     except (OSError, json.JSONDecodeError):
         return []
@@ -68,7 +75,7 @@ def _cargar_faqs() -> list[dict[str, Any]]:
 
 def _normalizar(texto: str) -> str:
     """
-    Normaliza texto para búsquedas simples.
+    Normaliza texto para realizar búsquedas simples.
     """
 
     return str(texto).lower().strip()
@@ -76,34 +83,32 @@ def _normalizar(texto: str) -> str:
 
 # =========================================================
 # TOOL 1
-# ESTADO DE LA BASE DE CONOCIMIENTO
+# CONSULTAR ESTADO DE LA BASE DE CONOCIMIENTO
 # =========================================================
 
 @tool("consultar_estado_base")
 def consultar_estado_base() -> str:
     """
-    Consulta el estado actual de la base de conocimiento de AstreaS.
+    Consulta si AstreaS tiene disponible una base de conocimiento
+    vectorial previamente indexada.
 
-    Utiliza esta herramienta cuando el usuario pregunte si AstreaS
-    tiene documentos indexados, si la base de conocimiento está
-    disponible o si el sistema está listo para realizar búsquedas
-    documentales.
+    Usa esta herramienta cuando el usuario pregunte si existen
+    documentos indexados, si la base de conocimiento está disponible
+    o si el sistema está listo para realizar búsquedas documentales.
 
     Returns:
         Estado actual de la base de conocimiento.
     """
 
-    disponible = index_exists()
-
-    if disponible:
+    if index_exists():
         return (
-            "La base de conocimiento está disponible "
-            "y existe un índice vectorial listo para consultas."
+            "La base de conocimiento está disponible y existe "
+            "un índice vectorial listo para realizar consultas."
         )
 
     return (
-        "La base de conocimiento no tiene actualmente "
-        "un índice vectorial disponible."
+        "Actualmente no existe un índice vectorial disponible "
+        "en la base de conocimiento."
     )
 
 
@@ -115,11 +120,11 @@ def consultar_estado_base() -> str:
 @tool("listar_documentos")
 def listar_documentos() -> str:
     """
-    Consulta los documentos PDF que están físicamente disponibles
+    Consulta los documentos PDF disponibles actualmente
     en la carpeta documental de AstreaS.
 
-    Utiliza esta herramienta cuando el usuario pregunte qué
-    documentos, archivos o manuales tiene disponibles AstreaS.
+    Usa esta herramienta cuando el usuario pregunte qué documentos,
+    manuales o archivos PDF están disponibles para consulta.
 
     Returns:
         Lista de documentos PDF disponibles.
@@ -128,19 +133,32 @@ def listar_documentos() -> str:
     if not PDF_DIR.exists():
         return (
             "No se encontró el directorio configurado "
-            "para los documentos."
+            "para almacenar los documentos."
         )
 
-    documentos = sorted(
-        archivo
-        for archivo in PDF_DIR.glob("*.pdf")
-        if archivo.is_file()
-    )
+    if not PDF_DIR.is_dir():
+        return (
+            "La ruta configurada para los documentos "
+            "no corresponde a un directorio válido."
+        )
+
+    try:
+        documentos = sorted(
+            archivo
+            for archivo in PDF_DIR.glob("*.pdf")
+            if archivo.is_file()
+        )
+
+    except OSError:
+        return (
+            "No fue posible consultar actualmente "
+            "el directorio de documentos."
+        )
 
     if not documentos:
         return (
             "Actualmente no hay documentos PDF "
-            "disponibles."
+            "disponibles para consulta."
         )
 
     nombres = [
@@ -148,47 +166,51 @@ def listar_documentos() -> str:
         for documento in documentos
     ]
 
-    resultado = (
-        f"Se encontraron {len(nombres)} "
-        f"documento(s) PDF disponible(s):\n"
-    )
-
-    resultado += "\n".join(
+    listado = "\n".join(
         f"- {nombre}"
         for nombre in nombres
     )
 
-    return resultado
+    return (
+        f"Se encontraron {len(nombres)} "
+        f"documento(s) PDF disponible(s):\n"
+        f"{listado}"
+    )
 
 
 # =========================================================
 # TOOL 3
-# BUSCAR SOLUCIÓN RÁPIDA
+# BUSCAR SOLUCIONES RÁPIDAS
 # =========================================================
 
 @tool("buscar_solucion_rapida")
-def buscar_solucion_rapida(consulta: str) -> str:
+def buscar_solucion_rapida(
+    consulta: str,
+) -> str:
     """
-    Busca un caso dentro de las soluciones rápidas registradas
-    en AstreaS.
+    Busca casos relacionados dentro de las soluciones rápidas
+    registradas en AstreaS.
 
-    Utiliza esta herramienta cuando el usuario pregunte por una
-    solución rápida, un caso frecuente o quiera saber si existe
-    una FAQ relacionada con determinado problema.
+    Usa esta herramienta cuando el usuario pregunte por un caso
+    frecuente, una solución rápida o quiera saber si existe una
+    FAQ relacionada con determinado problema.
 
-    Esta herramienta no sustituye la búsqueda documental RAG.
+    Esta herramienta consulta data/faqs.json y no sustituye
+    la recuperación semántica del sistema RAG.
 
     Args:
-        consulta: Tema, problema o palabras que desea buscar
-        el usuario.
+        consulta:
+            Tema, problema o palabras que desea buscar el usuario.
 
     Returns:
         Hasta cinco soluciones rápidas relacionadas.
     """
 
-    consulta = _normalizar(consulta)
+    consulta_normalizada = _normalizar(
+        consulta
+    )
 
-    if not consulta:
+    if not consulta_normalizada:
         return (
             "No se indicó ningún término "
             "para realizar la búsqueda."
@@ -198,15 +220,17 @@ def buscar_solucion_rapida(consulta: str) -> str:
 
     if not faqs:
         return (
-            "No hay soluciones rápidas disponibles "
-            "para consultar."
+            "Actualmente no hay soluciones rápidas "
+            "disponibles para consultar."
         )
 
     palabras_consulta = set(
-        consulta.split()
+        consulta_normalizada.split()
     )
 
-    coincidencias = []
+    coincidencias: list[
+        tuple[int, dict[str, Any]]
+    ] = []
 
     for faq in faqs:
 
@@ -228,8 +252,8 @@ def buscar_solucion_rapida(consulta: str) -> str:
             f"{categoria}"
         )
 
-        # Coincidencia exacta
-        if consulta in contenido:
+        # Coincidencia directa de toda la consulta.
+        if consulta_normalizada in contenido:
             puntuacion = 100
 
         else:
@@ -250,19 +274,16 @@ def buscar_solucion_rapida(consulta: str) -> str:
                 )
             )
 
-
     if not coincidencias:
         return (
             "No se encontraron soluciones rápidas "
-            f"relacionadas con '{consulta}'."
+            f"relacionadas con '{consulta_normalizada}'."
         )
-
 
     coincidencias.sort(
         key=lambda item: item[0],
         reverse=True,
     )
-
 
     resultados = []
 
@@ -289,7 +310,6 @@ def buscar_solucion_rapida(consulta: str) -> str:
             f"Resumen: {resumen}"
         )
 
-
     return "\n\n---\n\n".join(
         resultados
     )
@@ -306,6 +326,9 @@ TOOLS = [
 ]
 
 
+# Diccionario para encontrar rápidamente
+# una herramienta a partir del nombre
+# solicitado por el modelo.
 TOOLS_BY_NAME = {
     herramienta.name: herramienta
     for herramienta in TOOLS
@@ -321,25 +344,44 @@ def ejecutar_tools(
     pregunta: str,
 ) -> dict | None:
     """
-    Permite que el LLM determine si necesita utilizar
-    alguna herramienta registrada.
+    Permite que el modelo determine si necesita ejecutar
+    alguna de las herramientas registradas en AstreaS.
 
     Flujo:
 
-    1. Se enlazan las tools al LLM mediante bind_tools().
-    2. Se envía la pregunta.
-    3. El modelo puede solicitar una o varias tools.
-    4. Python ejecuta cada tool solicitada.
-    5. Los resultados se devuelven mediante ToolMessage.
-    6. El LLM genera la respuesta final.
+    1. Las tools se enlazan al LLM mediante bind_tools().
+    2. Se envía la pregunta del usuario al modelo.
+    3. El modelo decide si necesita ejecutar una tool.
+    4. Python ejecuta la herramienta solicitada.
+    5. El resultado se devuelve mediante ToolMessage.
+    6. El modelo utiliza ese resultado para generar
+       la respuesta final.
 
-    Si el modelo decide que no necesita ninguna herramienta,
-    devuelve None para que la consulta continúe por el RAG.
+    Si ninguna herramienta es necesaria, devuelve None.
+    De esta forma, la consulta puede continuar normalmente
+    por el pipeline RAG.
     """
+
+    pregunta = str(
+        pregunta
+    ).strip()
+
+    if not pregunta:
+        return None
+
+
+    # -----------------------------------------------------
+    # 1. Enlazar herramientas al modelo
+    # -----------------------------------------------------
 
     llm_con_tools = llm.bind_tools(
         TOOLS
     )
+
+
+    # -----------------------------------------------------
+    # 2. Crear mensaje inicial
+    # -----------------------------------------------------
 
     mensajes = [
         HumanMessage(
@@ -349,7 +391,7 @@ def ejecutar_tools(
 
 
     # -----------------------------------------------------
-    # 1. El modelo decide si necesita una tool
+    # 3. El modelo decide si necesita una herramienta
     # -----------------------------------------------------
 
     respuesta_modelo = (
@@ -359,16 +401,24 @@ def ejecutar_tools(
     )
 
 
+    # Acceso defensivo a tool_calls.
+    tool_calls = getattr(
+        respuesta_modelo,
+        "tool_calls",
+        [],
+    ) or []
+
+
     # -----------------------------------------------------
-    # 2. Si no pidió tools, continuar con RAG
+    # 4. Sin tool -> continuar con RAG
     # -----------------------------------------------------
 
-    if not respuesta_modelo.tool_calls:
+    if not tool_calls:
         return None
 
 
-    # La solicitud de tool debe conservarse
-    # dentro del historial.
+    # Se agrega al historial la respuesta del modelo
+    # donde solicitó las tools.
     mensajes.append(
         respuesta_modelo
     )
@@ -378,10 +428,10 @@ def ejecutar_tools(
 
 
     # -----------------------------------------------------
-    # 3. Ejecutar las tools solicitadas
+    # 5. Ejecutar cada herramienta solicitada
     # -----------------------------------------------------
 
-    for tool_call in respuesta_modelo.tool_calls:
+    for tool_call in tool_calls:
 
         nombre = tool_call.get(
             "name"
@@ -392,17 +442,37 @@ def ejecutar_tools(
             {},
         )
 
+        tool_call_id = tool_call.get(
+            "id"
+        )
+
+
+        # Si el modelo genera una llamada incompleta,
+        # no se intenta ejecutar.
+        if not nombre or not tool_call_id:
+            continue
+
+
         herramienta = TOOLS_BY_NAME.get(
             nombre
         )
 
 
+        # -------------------------------------------------
+        # Tool inexistente
+        # -------------------------------------------------
+
         if herramienta is None:
 
             resultado = (
                 f"La herramienta '{nombre}' "
-                "no está registrada."
+                "no está disponible."
             )
+
+
+        # -------------------------------------------------
+        # Tool existente
+        # -------------------------------------------------
 
         else:
 
@@ -412,34 +482,36 @@ def ejecutar_tools(
                     argumentos
                 )
 
-            except Exception as error:
+                # Solo se registra como utilizada
+                # cuando realmente se ejecutó.
+                herramientas_usadas.append(
+                    nombre
+                )
 
+            except Exception:
+
+                # No se envían detalles internos
+                # de excepciones al modelo.
                 resultado = (
-                    "No fue posible ejecutar "
-                    f"la herramienta '{nombre}': "
-                    f"{error}"
+                    f"No fue posible ejecutar "
+                    f"la herramienta '{nombre}'."
                 )
 
 
-        herramientas_usadas.append(
-            nombre
-        )
-
-
         # -------------------------------------------------
-        # 4. Devolver resultado al modelo
+        # 6. Enviar resultado de la tool al modelo
         # -------------------------------------------------
 
         mensajes.append(
             ToolMessage(
                 content=str(resultado),
-                tool_call_id=tool_call["id"],
+                tool_call_id=tool_call_id,
             )
         )
 
 
     # -----------------------------------------------------
-    # 5. El LLM redacta la respuesta final
+    # 7. El LLM redacta la respuesta final
     # -----------------------------------------------------
 
     respuesta_final = (
@@ -449,7 +521,19 @@ def ejecutar_tools(
     )
 
 
+    contenido_final = str(
+        respuesta_final.content
+    ).strip()
+
+
+    if not contenido_final:
+        contenido_final = (
+            "La herramienta fue ejecutada, "
+            "pero no fue posible generar una respuesta final."
+        )
+
+
     return {
-        "respuesta": respuesta_final.content,
+        "respuesta": contenido_final,
         "tools_usadas": herramientas_usadas,
     }
