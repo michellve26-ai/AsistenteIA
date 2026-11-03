@@ -18,7 +18,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import (
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.tools import tool
 
 from src import config
@@ -31,8 +35,7 @@ from src.vectorstore import index_exists
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# config.PDF_DIR ya está definido en src/config.py
-# con el valor por defecto "data/pdfs".
+# config.PDF_DIR está definido en src/config.py.
 PDF_DIR = BASE_DIR / config.PDF_DIR
 
 FAQS_PATH = BASE_DIR / "data" / "faqs.json"
@@ -46,8 +49,8 @@ def _cargar_faqs() -> list[dict[str, Any]]:
     """
     Lee y valida el archivo de preguntas frecuentes.
 
-    Esta función es interna.
-    No se expone directamente como tool al modelo.
+    Esta función es interna y no está expuesta directamente
+    como tool al modelo.
     """
 
     if not FAQS_PATH.exists():
@@ -75,7 +78,7 @@ def _cargar_faqs() -> list[dict[str, Any]]:
 
 def _normalizar(texto: str) -> str:
     """
-    Normaliza texto para realizar búsquedas simples.
+    Normaliza texto para búsquedas simples.
     """
 
     return str(texto).lower().strip()
@@ -92,9 +95,9 @@ def consultar_estado_base() -> str:
     Consulta si AstreaS tiene disponible una base de conocimiento
     vectorial previamente indexada.
 
-    Usa esta herramienta cuando el usuario pregunte si existen
-    documentos indexados, si la base de conocimiento está disponible
-    o si el sistema está listo para realizar búsquedas documentales.
+    Utiliza esta herramienta únicamente cuando el usuario pregunte
+    por el estado de la base de conocimiento, la indexación,
+    los documentos indexados o la disponibilidad del índice vectorial.
 
     Returns:
         Estado actual de la base de conocimiento.
@@ -123,8 +126,9 @@ def listar_documentos() -> str:
     Consulta los documentos PDF disponibles actualmente
     en la carpeta documental de AstreaS.
 
-    Usa esta herramienta cuando el usuario pregunte qué documentos,
-    manuales o archivos PDF están disponibles para consulta.
+    Utiliza esta herramienta cuando el usuario pregunte
+    qué documentos, manuales o archivos PDF tiene disponibles
+    AstreaS para consulta.
 
     Returns:
         Lista de documentos PDF disponibles.
@@ -191,9 +195,9 @@ def buscar_solucion_rapida(
     Busca casos relacionados dentro de las soluciones rápidas
     registradas en AstreaS.
 
-    Usa esta herramienta cuando el usuario pregunte por un caso
-    frecuente, una solución rápida o quiera saber si existe una
-    FAQ relacionada con determinado problema.
+    Utiliza esta herramienta cuando el usuario pregunte
+    expresamente por una solución rápida, una pregunta frecuente,
+    una FAQ o un caso frecuente registrado.
 
     Esta herramienta consulta data/faqs.json y no sustituye
     la recuperación semántica del sistema RAG.
@@ -252,7 +256,7 @@ def buscar_solucion_rapida(
             f"{categoria}"
         )
 
-        # Coincidencia directa de toda la consulta.
+        # Coincidencia directa de la consulta completa.
         if consulta_normalizada in contenido:
             puntuacion = 100
 
@@ -326,13 +330,86 @@ TOOLS = [
 ]
 
 
-# Diccionario para encontrar rápidamente
-# una herramienta a partir del nombre
-# solicitado por el modelo.
+# Permite localizar rápidamente una tool
+# a partir del nombre solicitado por el modelo.
 TOOLS_BY_NAME = {
     herramienta.name: herramienta
     for herramienta in TOOLS
 }
+
+
+# =========================================================
+# CONFIGURACIÓN DEL EJECUTOR
+# =========================================================
+
+# Número máximo de rondas de Tool Calling.
+# Evita ciclos infinitos si el modelo continúa
+# solicitando herramientas.
+MAX_TOOL_ITERATIONS = 5
+
+
+TOOL_SYSTEM_PROMPT = """
+Eres el orquestador de herramientas de AstreaS,
+un asistente especializado en soporte técnico.
+
+Tu única responsabilidad en esta etapa es decidir si la consulta
+del usuario necesita utilizar alguna de las herramientas disponibles.
+
+Herramientas disponibles:
+
+1. consultar_estado_base
+   Úsala únicamente cuando el usuario pregunte por:
+   - estado de la base de conocimiento,
+   - indexación,
+   - existencia del índice vectorial,
+   - disponibilidad de documentos indexados.
+
+2. listar_documentos
+   Úsala únicamente cuando el usuario pregunte:
+   - qué documentos existen,
+   - qué manuales están disponibles,
+   - qué archivos PDF tiene disponibles AstreaS.
+
+3. buscar_solucion_rapida
+   Úsala únicamente cuando el usuario pregunte expresamente por:
+   - soluciones rápidas,
+   - preguntas frecuentes,
+   - FAQs,
+   - casos frecuentes registrados.
+
+Reglas obligatorias:
+
+- NO utilices estas herramientas para responder procedimientos
+  técnicos contenidos en los manuales.
+
+- NO utilices estas herramientas para preguntas cuyo contenido
+  deba recuperarse mediante el sistema RAG.
+
+- Si ninguna herramienta es apropiada, no intentes responder
+  la pregunta en esta etapa.
+
+- Si ninguna herramienta es apropiada, simplemente no solicites
+  ninguna tool. La pregunta continuará posteriormente hacia el RAG.
+
+- No utilices conocimiento general para reemplazar al RAG.
+
+- Nunca inventes herramientas.
+
+- Nunca inventes resultados de herramientas.
+
+- Puedes solicitar varias herramientas en la misma ronda cuando
+  la consulta realmente necesite información de varias de ellas.
+
+- Después de recibir los resultados de una herramienta puedes
+  solicitar otra herramienta únicamente si es necesaria para
+  completar la misma consulta.
+
+- No repitas innecesariamente una herramienta que ya fue ejecutada
+  con los mismos argumentos.
+
+- Cuando ya tengas toda la información necesaria proveniente
+  de las tools, genera una respuesta clara y directa para el usuario.
+""".strip()
 
 
 # =========================================================
@@ -344,22 +421,29 @@ def ejecutar_tools(
     pregunta: str,
 ) -> dict | None:
     """
-    Permite que el modelo determine si necesita ejecutar
-    alguna de las herramientas registradas en AstreaS.
+    Ejecuta el flujo de Tool Calling de AstreaS.
 
     Flujo:
 
-    1. Las tools se enlazan al LLM mediante bind_tools().
-    2. Se envía la pregunta del usuario al modelo.
-    3. El modelo decide si necesita ejecutar una tool.
-    4. Python ejecuta la herramienta solicitada.
-    5. El resultado se devuelve mediante ToolMessage.
-    6. El modelo utiliza ese resultado para generar
-       la respuesta final.
+    1. Enlaza las tools al modelo mediante bind_tools().
+    2. Envía la pregunta al modelo.
+    3. El modelo decide si necesita una o varias tools.
+    4. Si no solicita ninguna, devuelve None y la consulta
+       continúa por el pipeline RAG.
+    5. Si solicita tools, Python ejecuta las funciones.
+    6. Los resultados se devuelven mediante ToolMessage.
+    7. El modelo puede solicitar nuevas tools si todavía
+       son necesarias.
+    8. Cuando deja de solicitar tools, genera la respuesta final.
+    9. El ciclo está limitado para evitar ejecuciones infinitas.
 
-    Si ninguna herramienta es necesaria, devuelve None.
-    De esta forma, la consulta puede continuar normalmente
-    por el pipeline RAG.
+    Returns:
+        None:
+            Cuando ninguna herramienta aplica y la consulta
+            debe continuar por el RAG.
+
+        dict:
+            Cuando una o varias herramientas fueron utilizadas.
     """
 
     pregunta = str(
@@ -370,170 +454,290 @@ def ejecutar_tools(
         return None
 
 
-    # -----------------------------------------------------
-    # 1. Enlazar herramientas al modelo
-    # -----------------------------------------------------
+    # =====================================================
+    # 1. ENLAZAR TOOLS AL MODELO
+    # =====================================================
 
     llm_con_tools = llm.bind_tools(
         TOOLS
     )
 
 
-    # -----------------------------------------------------
-    # 2. Crear mensaje inicial
-    # -----------------------------------------------------
+    # =====================================================
+    # 2. HISTORIAL INTERNO
+    # =====================================================
 
     mensajes = [
+        SystemMessage(
+            content=TOOL_SYSTEM_PROMPT
+        ),
         HumanMessage(
             content=pregunta
-        )
+        ),
     ]
 
 
-    # -----------------------------------------------------
-    # 3. El modelo decide si necesita una herramienta
-    # -----------------------------------------------------
+    herramientas_usadas: list[str] = []
 
-    respuesta_modelo = (
-        llm_con_tools.invoke(
-            mensajes
-        )
-    )
+    # Para evitar repetir exactamente la misma llamada.
+    llamadas_ejecutadas: set[str] = set()
 
+    hubo_tool = False
 
-    # Acceso defensivo a tool_calls.
-    tool_calls = getattr(
-        respuesta_modelo,
-        "tool_calls",
-        [],
-    ) or []
+    rondas_ejecutadas = 0
 
 
-    # -----------------------------------------------------
-    # 4. Sin tool -> continuar con RAG
-    # -----------------------------------------------------
+    # =====================================================
+    # 3. CICLO CONTROLADO DE TOOL CALLING
+    # =====================================================
 
-    if not tool_calls:
-        return None
+    for ronda in range(
+        1,
+        MAX_TOOL_ITERATIONS + 1,
+    ):
 
-
-    # Se agrega al historial la respuesta del modelo
-    # donde solicitó las tools.
-    mensajes.append(
-        respuesta_modelo
-    )
-
-
-    herramientas_usadas = []
-
-
-    # -----------------------------------------------------
-    # 5. Ejecutar cada herramienta solicitada
-    # -----------------------------------------------------
-
-    for tool_call in tool_calls:
-
-        nombre = tool_call.get(
-            "name"
-        )
-
-        argumentos = tool_call.get(
-            "args",
-            {},
-        )
-
-        tool_call_id = tool_call.get(
-            "id"
-        )
-
-
-        # Si el modelo genera una llamada incompleta,
-        # no se intenta ejecutar.
-        if not nombre or not tool_call_id:
-            continue
-
-
-        herramienta = TOOLS_BY_NAME.get(
-            nombre
-        )
+        rondas_ejecutadas = ronda
 
 
         # -------------------------------------------------
-        # Tool inexistente
+        # EL MODELO ANALIZA LA CONVERSACIÓN
         # -------------------------------------------------
 
-        if herramienta is None:
+        try:
+            respuesta_modelo = llm_con_tools.invoke(
+                mensajes
+            )
 
-            resultado = (
-                f"La herramienta '{nombre}' "
-                "no está disponible."
+        except Exception:
+            # Una falla del modelo en esta etapa
+            # no debe impedir el fallback hacia RAG
+            # cuando todavía no se ha usado ninguna tool.
+            if not hubo_tool:
+                return None
+
+            return {
+                "respuesta": (
+                    "No fue posible completar la consulta "
+                    "utilizando las herramientas disponibles."
+                ),
+                "tools_usadas": herramientas_usadas,
+                "iteraciones": rondas_ejecutadas,
+            }
+
+
+        # -------------------------------------------------
+        # OBTENER TOOL CALLS DE FORMA DEFENSIVA
+        # -------------------------------------------------
+
+        tool_calls = getattr(
+            respuesta_modelo,
+            "tool_calls",
+            [],
+        ) or []
+
+
+        # =================================================
+        # EL MODELO NO SOLICITA MÁS TOOLS
+        # =================================================
+
+        if not tool_calls:
+
+            # Nunca se usó ninguna tool:
+            # la consulta debe continuar por el RAG.
+            if not hubo_tool:
+                return None
+
+
+            # Ya hubo tools:
+            # esta es la respuesta final.
+            contenido = str(
+                respuesta_modelo.content or ""
+            ).strip()
+
+
+            if not contenido:
+                contenido = (
+                    "La consulta fue procesada con las "
+                    "herramientas disponibles, pero no fue "
+                    "posible generar una respuesta final."
+                )
+
+
+            return {
+                "respuesta": contenido,
+                "tools_usadas": herramientas_usadas,
+                "iteraciones": rondas_ejecutadas,
+            }
+
+
+        # =================================================
+        # EXISTEN TOOL CALLS
+        # =================================================
+
+        hubo_tool = True
+
+
+        # La respuesta del asistente que contiene los
+        # tool_calls debe agregarse antes de los ToolMessage.
+        mensajes.append(
+            respuesta_modelo
+        )
+
+
+        # =================================================
+        # 4. EJECUTAR TOOLS SOLICITADAS
+        # =================================================
+
+        for tool_call in tool_calls:
+
+            nombre = tool_call.get(
+                "name"
+            )
+
+            argumentos = tool_call.get(
+                "args",
+                {},
+            )
+
+            tool_call_id = tool_call.get(
+                "id"
             )
 
 
-        # -------------------------------------------------
-        # Tool existente
-        # -------------------------------------------------
+            # ---------------------------------------------
+            # VALIDAR LLAMADA
+            # ---------------------------------------------
 
-        else:
+            if not nombre or not tool_call_id:
+                continue
+
+
+            if not isinstance(
+                argumentos,
+                dict,
+            ):
+                argumentos = {}
+
+
+            herramienta = TOOLS_BY_NAME.get(
+                nombre
+            )
+
+
+            # ---------------------------------------------
+            # IDENTIFICADOR DE LLAMADA
+            # ---------------------------------------------
 
             try:
-
-                resultado = herramienta.invoke(
-                    argumentos
-                )
-
-                # Solo se registra como utilizada
-                # cuando realmente se ejecutó.
-                herramientas_usadas.append(
-                    nombre
+                argumentos_serializados = json.dumps(
+                    argumentos,
+                    sort_keys=True,
+                    ensure_ascii=False,
+                    default=str,
                 )
 
             except Exception:
-
-                # No se envían detalles internos
-                # de excepciones al modelo.
-                resultado = (
-                    f"No fue posible ejecutar "
-                    f"la herramienta '{nombre}'."
+                argumentos_serializados = str(
+                    argumentos
                 )
 
 
-        # -------------------------------------------------
-        # 6. Enviar resultado de la tool al modelo
-        # -------------------------------------------------
-
-        mensajes.append(
-            ToolMessage(
-                content=str(resultado),
-                tool_call_id=tool_call_id,
+            firma_llamada = (
+                f"{nombre}:"
+                f"{argumentos_serializados}"
             )
-        )
 
 
-    # -----------------------------------------------------
-    # 7. El LLM redacta la respuesta final
-    # -----------------------------------------------------
+            # ---------------------------------------------
+            # EVITAR REPETICIÓN EXACTA
+            # ---------------------------------------------
 
-    respuesta_final = (
-        llm_con_tools.invoke(
-            mensajes
-        )
-    )
+            if firma_llamada in llamadas_ejecutadas:
+
+                resultado = (
+                    f"La herramienta '{nombre}' ya fue ejecutada "
+                    "previamente con los mismos argumentos. "
+                    "Utiliza el resultado anterior."
+                )
+
+                mensajes.append(
+                    ToolMessage(
+                        content=resultado,
+                        tool_call_id=tool_call_id,
+                    )
+                )
+
+                continue
 
 
-    contenido_final = str(
-        respuesta_final.content
-    ).strip()
+            llamadas_ejecutadas.add(
+                firma_llamada
+            )
 
 
-    if not contenido_final:
-        contenido_final = (
-            "La herramienta fue ejecutada, "
-            "pero no fue posible generar una respuesta final."
-        )
+            # ---------------------------------------------
+            # TOOL NO REGISTRADA
+            # ---------------------------------------------
+
+            if herramienta is None:
+
+                resultado = (
+                    f"La herramienta '{nombre}' "
+                    "no está registrada en AstreaS."
+                )
 
 
-    return {
-        "respuesta": contenido_final,
-        "tools_usadas": herramientas_usadas,
-    }
+            # ---------------------------------------------
+            # TOOL REGISTRADA
+            # ---------------------------------------------
+
+            else:
+
+                try:
+                    resultado = herramienta.invoke(
+                        argumentos
+                    )
+
+                    herramientas_usadas.append(
+                        nombre
+                    )
+
+                except Exception:
+                    # No se exponen excepciones internas
+                    # al modelo ni al usuario.
+                    resultado = (
+                        f"No fue posible ejecutar "
+                        f"la herramienta '{nombre}'."
+                    )
+
+
+            # =================================================
+            # 5. DEVOLVER RESULTADO MEDIANTE TOOLMESSAGE
+            # =================================================
+
+            mensajes.append(
+                ToolMessage(
+                    content=str(resultado),
+                    tool_call_id=tool_call_id,
+                )
+            )
+
+
+    # =====================================================
+    # 6. LÍMITE MÁXIMO ALCANZADO
+    # =====================================================
+
+    if hubo_tool:
+
+        return {
+            "respuesta": (
+                "No fue posible completar la consulta con las "
+                "herramientas disponibles dentro del límite "
+                "de procesamiento permitido."
+            ),
+            "tools_usadas": herramientas_usadas,
+            "iteraciones": MAX_TOOL_ITERATIONS,
+        }
+
+
+    return None
