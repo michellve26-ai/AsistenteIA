@@ -9,6 +9,7 @@ Abrir luego:
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import Literal
 
@@ -29,6 +30,18 @@ from src.rag_chain import (
     get_prompt_template,
     rag_pipeline,
 )
+from src.index_state import (
+    documentos_cambiaron,
+    guardar_estado_actual,
+    obtener_estado_actual,
+)
+
+
+# =========================================================
+# LOGGING
+# =========================================================
+
+logger = logging.getLogger(__name__)
 
 
 # =========================================================
@@ -124,6 +137,168 @@ def _lazy_vectorstore():
         )
 
     return _vector_store
+
+
+# =========================================================
+# INDEXACIÓN AUTOMÁTICA AL INICIAR
+# =========================================================
+
+@app.on_event("startup")
+def auto_reindexar_si_es_necesario():
+    """
+    Verifica automáticamente si los documentos PDF
+    cambiaron desde la última indexación.
+
+    Reindexa únicamente cuando:
+
+    - no existe un índice vectorial, o
+    - se agregó un PDF, o
+    - se modificó un PDF, o
+    - se eliminó un PDF.
+
+    Si los documentos no cambiaron, reutiliza el índice
+    existente y no recalcula embeddings.
+
+    Una falla durante esta comprobación no impide
+    que la aplicación pueda iniciar.
+    """
+
+    global _vector_store
+
+    try:
+
+        # -------------------------------------------------
+        # OBTENER LOS PDF ACTUALES
+        # -------------------------------------------------
+
+        estado_actual = obtener_estado_actual()
+
+
+        # -------------------------------------------------
+        # SEGURIDAD:
+        #
+        # Si no existe ningún PDF actualmente,
+        # no reconstruimos automáticamente la base.
+        #
+        # Esto evita eliminar o reemplazar accidentalmente
+        # un índice existente por una colección vacía.
+        # -------------------------------------------------
+
+        if not estado_actual:
+
+            logger.warning(
+                "Autoindexación omitida: "
+                "no se encontraron documentos PDF."
+            )
+
+            return
+
+
+        # -------------------------------------------------
+        # DETERMINAR SI ES NECESARIO REINDEXAR
+        # -------------------------------------------------
+
+        necesita_indexacion = (
+            not index_exists()
+            or documentos_cambiaron()
+        )
+
+
+        if not necesita_indexacion:
+
+            logger.info(
+                "Base vectorial actualizada. "
+                "No es necesario reindexar."
+            )
+
+            return
+
+
+        logger.info(
+            "Se detectaron cambios en los documentos. "
+            "Iniciando reindexación automática."
+        )
+
+
+        # -------------------------------------------------
+        # CARGAR DOCUMENTOS
+        # -------------------------------------------------
+
+        documents = load_pdfs()
+
+
+        # -------------------------------------------------
+        # CREAR CHUNKS
+        # -------------------------------------------------
+
+        chunks = split_documents(
+            documents
+        )
+
+
+        # -------------------------------------------------
+        # SEGURIDAD:
+        #
+        # Nunca reconstruimos ChromaDB con cero chunks.
+        # -------------------------------------------------
+
+        if not chunks:
+
+            logger.warning(
+                "Autoindexación cancelada: "
+                "no se generaron fragmentos."
+            )
+
+            return
+
+
+        # -------------------------------------------------
+        # RECONSTRUIR CHROMADB
+        # -------------------------------------------------
+
+        build_vectorstore(
+            chunks,
+            _lazy_embeddings(),
+            rebuild=True,
+        )
+
+
+        # -------------------------------------------------
+        # FORZAR RECARGA DEL VECTORSTORE
+        # -------------------------------------------------
+
+        _vector_store = None
+
+
+        # -------------------------------------------------
+        # GUARDAR ESTADO SOLO DESPUÉS DE ÉXITO
+        # -------------------------------------------------
+
+        guardar_estado_actual()
+
+
+        logger.info(
+            "Reindexación automática completada "
+            "correctamente. Chunks indexados: %s",
+            len(chunks),
+        )
+
+
+    except Exception:
+
+        # -------------------------------------------------
+        # IMPORTANTE:
+        #
+        # Un problema durante la autoindexación no debe
+        # impedir que FastAPI / AstreaS inicie.
+        #
+        # El error queda registrado en los logs de Render.
+        # -------------------------------------------------
+
+        logger.exception(
+            "No fue posible realizar la "
+            "reindexación automática."
+        )
 
 
 # =========================================================
@@ -312,6 +487,8 @@ def reindex():
     embeddings
       ↓
     ChromaDB
+      ↓
+    guardar estado de documentos
     """
 
     global _vector_store
@@ -324,15 +501,45 @@ def reindex():
             documents
         )
 
+
+        # -------------------------------------------------
+        # SEGURIDAD
+        #
+        # Evita reconstruir la base con cero fragmentos.
+        # -------------------------------------------------
+
+        if not chunks:
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No se encontraron fragmentos "
+                    "válidos para indexar."
+                ),
+            )
+
+
         build_vectorstore(
             chunks,
             _lazy_embeddings(),
             rebuild=True,
         )
 
+
         # Forzar que la base vectorial
         # se vuelva a cargar después.
         _vector_store = None
+
+
+        # -------------------------------------------------
+        # GUARDAR ESTADO
+        #
+        # Solo se ejecuta después de que ChromaDB
+        # fue reconstruido correctamente.
+        # -------------------------------------------------
+
+        guardar_estado_actual()
+
 
         return {
             "ok": True,
@@ -340,6 +547,12 @@ def reindex():
                 chunks
             ),
         }
+
+
+    except HTTPException:
+
+        raise
+
 
     except FileNotFoundError as error:
 
@@ -350,7 +563,12 @@ def reindex():
             ),
         )
 
+
     except Exception:
+
+        logger.exception(
+            "Error durante la indexación manual."
+        )
 
         raise HTTPException(
             status_code=500,
@@ -386,17 +604,17 @@ def chat(
        │
        └── No
             ↓
-        historial
+         historial
             ↓
-        rag_pipeline()
+         rag_pipeline()
             ↓
        contextualización
             ↓
-       Tool Calling
-          /     \
-       Tool      RAG
-        ↓         ↓
-    respuesta  ChromaDB
+        Tool Calling
+           /     \
+        Tool      RAG
+         ↓         ↓
+     respuesta  ChromaDB
                   ↓
                respuesta
     """
@@ -454,7 +672,7 @@ def chat(
     # 4. VERIFICAR BASE VECTORIAL
     # =====================================================
     #
-    # Por ahora mantenemos esta validación porque
+    # Mantenemos esta validación porque
     # el pipeline principal utiliza ChromaDB como fallback.
     #
     # Las tools operativas también pueden consultar
@@ -489,6 +707,10 @@ def chat(
         )
 
     except Exception:
+
+        logger.exception(
+            "Error procesando consulta del chat."
+        )
 
         raise HTTPException(
             status_code=500,
