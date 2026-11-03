@@ -434,16 +434,20 @@ def ejecutar_tools(
     6. Los resultados se devuelven mediante ToolMessage.
     7. El modelo puede solicitar nuevas tools si todavía
        son necesarias.
-    8. Cuando deja de solicitar tools, genera la respuesta final.
-    9. El ciclo está limitado para evitar ejecuciones infinitas.
+    8. Si buscar_solucion_rapida no encuentra coincidencias,
+       devuelve None para continuar automáticamente por RAG.
+    9. Cuando deja de solicitar tools, genera la respuesta final.
+    10. El ciclo está limitado para evitar ejecuciones infinitas.
 
     Returns:
         None:
-            Cuando ninguna herramienta aplica y la consulta
+            Cuando ninguna herramienta aplica o cuando una búsqueda
+            de solución rápida no encuentra coincidencias y la consulta
             debe continuar por el RAG.
 
         dict:
-            Cuando una o varias herramientas fueron utilizadas.
+            Cuando una o varias herramientas fueron utilizadas
+            y resolvieron la consulta.
     """
 
     pregunta = str(
@@ -698,9 +702,32 @@ def ejecutar_tools(
                         argumentos
                     )
 
+
+                    # =====================================
+                    # FALLBACK AUTOMÁTICO FAQ -> RAG
+                    # =====================================
+                    #
+                    # Si la tool buscar_solucion_rapida
+                    # no encuentra coincidencias, no debe
+                    # cerrar la consulta.
+                    #
+                    # Devuelve None para que rag_pipeline()
+                    # continúe automáticamente por ChromaDB.
+                    # =====================================
+
+                    if (
+                        nombre == "buscar_solucion_rapida"
+                        and str(resultado).startswith(
+                            "No se encontraron soluciones rápidas"
+                        )
+                    ):
+                        return None
+
+
                     herramientas_usadas.append(
                         nombre
                     )
+
 
                 except Exception:
                     # No se exponen excepciones internas
