@@ -84,6 +84,51 @@ def _normalizar(texto: str) -> str:
     return str(texto).lower().strip()
 
 
+def _es_mensaje_interno_sin_tool(
+    contenido: str,
+) -> bool:
+    """
+    Detecta mensajes internos que algunos modelos pueden generar
+    cuando deciden no solicitar ninguna herramienta.
+
+    Estos mensajes nunca deben mostrarse al usuario.
+    En esos casos la consulta debe continuar hacia el RAG.
+    """
+
+    texto = str(
+        contenido or ""
+    ).strip().lower()
+
+    if not texto:
+        return False
+
+    # Elimina paréntesis y espacios adicionales para
+    # reconocer variantes como "(no tool requested)".
+    texto_normalizado = (
+        texto
+        .replace("(", "")
+        .replace(")", "")
+        .strip()
+    )
+
+    mensajes_internos = {
+        "no tool requested",
+        "no tools requested",
+        "no tool",
+        "no tools",
+        "no tool needed",
+        "no tools needed",
+        "no tool required",
+        "no tools required",
+        "ninguna tool solicitada",
+        "ninguna herramienta solicitada",
+        "no se requiere tool",
+        "no se requiere herramienta",
+    }
+
+    return texto_normalizado in mensajes_internos
+
+
 # =========================================================
 # TOOL 1
 # CONSULTAR ESTADO DE LA BASE DE CONOCIMIENTO
@@ -385,11 +430,29 @@ Reglas obligatorias:
 - NO utilices estas herramientas para preguntas cuyo contenido
   deba recuperarse mediante el sistema RAG.
 
+- Preguntas sobre cómo realizar procesos, configuraciones,
+  anulaciones, creación de documentos, facturación, inventario,
+  cartera, cajas, bancos u otras funciones del sistema deben
+  continuar hacia el RAG cuando ninguna herramienta específica
+  sea necesaria.
+
 - Si ninguna herramienta es apropiada, no intentes responder
   la pregunta en esta etapa.
 
 - Si ninguna herramienta es apropiada, simplemente no solicites
   ninguna tool. La pregunta continuará posteriormente hacia el RAG.
+
+- Si ninguna herramienta es apropiada, NO escribas mensajes como:
+  "(no tool requested)",
+  "no tool requested",
+  "no tool",
+  "no tools",
+  "no tool needed",
+  ni ningún texto equivalente.
+
+- Cuando ninguna herramienta aplique, no generes una respuesta
+  textual. Simplemente finaliza sin solicitar tools para permitir
+  que el pipeline continúe hacia el RAG.
 
 - No utilices conocimiento general para reemplazar al RAG.
 
@@ -486,6 +549,8 @@ def ejecutar_tools(
     # Para evitar repetir exactamente la misma llamada.
     llamadas_ejecutadas: set[str] = set()
 
+    # Solo será True cuando una tool registrada haya sido
+    # ejecutada realmente.
     hubo_tool = False
 
     rondas_ejecutadas = 0
@@ -546,19 +611,42 @@ def ejecutar_tools(
 
         if not tool_calls:
 
-            # Nunca se usó ninguna tool:
-            # la consulta debe continuar por el RAG.
-            if not hubo_tool:
-                return None
-
-
-            # Ya hubo tools:
-            # esta es la respuesta final.
             contenido = str(
                 respuesta_modelo.content or ""
             ).strip()
 
 
+            # =============================================
+            # PROTECCIÓN CONTRA MENSAJES INTERNOS
+            # =============================================
+            #
+            # Algunos modelos pueden escribir literalmente:
+            #
+            # "(no tool requested)"
+            # "no tool requested"
+            # "no tool needed"
+            #
+            # Eso NO es una respuesta para el usuario.
+            # Significa que la consulta debe seguir hacia RAG.
+            # =============================================
+
+            if _es_mensaje_interno_sin_tool(
+                contenido
+            ):
+                return None
+
+
+            # Nunca se ejecutó realmente ninguna tool:
+            # la consulta debe continuar por el RAG,
+            # independientemente del texto que haya intentado
+            # generar el orquestador.
+            if not hubo_tool:
+                return None
+
+
+            # Ya hubo una o varias tools válidas:
+            # esta es la respuesta final generada a partir
+            # de sus resultados.
             if not contenido:
                 contenido = (
                     "La consulta fue procesada con las "
@@ -578,7 +666,14 @@ def ejecutar_tools(
         # EXISTEN TOOL CALLS
         # =================================================
 
-        hubo_tool = True
+        # IMPORTANTE:
+        # No establecemos hubo_tool = True aquí.
+        #
+        # Un modelo podría generar un tool_call inválido,
+        # incompleto o hacia una herramienta inexistente.
+        #
+        # Solo marcaremos hubo_tool como True cuando una
+        # herramienta registrada sea ejecutada realmente.
 
 
         # La respuesta del asistente que contiene los
@@ -724,9 +819,15 @@ def ejecutar_tools(
                         return None
 
 
-                    herramientas_usadas.append(
-                        nombre
-                    )
+                    # Solo aquí confirmamos que se ejecutó
+                    # realmente una herramienta válida.
+                    hubo_tool = True
+
+
+                    if nombre not in herramientas_usadas:
+                        herramientas_usadas.append(
+                            nombre
+                        )
 
 
                 except Exception:
@@ -767,4 +868,8 @@ def ejecutar_tools(
         }
 
 
+    # Si ninguna herramienta válida llegó a ejecutarse,
+    # el sistema nunca debe bloquear la consulta.
+    #
+    # Devuelve None para continuar normalmente por RAG.
     return None
