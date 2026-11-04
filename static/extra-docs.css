@@ -1,0 +1,30 @@
+/* =========================================================
+   Manuales extra — estilos de la función "agregar PDF desde el chat".
+   Archivo independiente: no modifica ningún estilo existente.
+   Usa las variables de color del tema actual (con respaldo).
+   ========================================================= */
+
+.chat-input-bar .btn-attach {
+  flex: 0 0 auto;
+  background: var(--card, #fff);
+  color: var(--muted, #6b6b6b);
+  border: 1px solid var(--line, #d9d9d9);
+  padding: 0 14px;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.chat-input-bar .btn-attach:hover:not(:disabled) {
+  border-color: var(--accent, currentColor);
+}
+
+.chat-input-bar .btn-attach:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Mientras se arrastra un archivo sobre el chat */
+#view-chat.is-dragover {
+  outline: 2px dashed var(--accent, currentColor);
+  outline-offset: -8px;
+}

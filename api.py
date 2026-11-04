@@ -13,8 +13,9 @@ import logging
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from src import config
@@ -34,6 +35,14 @@ from src.index_state import (
     documentos_cambiaron,
     guardar_estado_actual,
     obtener_estado_actual,
+)
+from src.extra_docs import (
+    MAX_UPLOAD_BYTES,
+    MAX_UPLOAD_MB,
+    CombinedVectorStore,
+    ExtraDocs,
+    ExtraDocsError,
+    token_valido,
 )
 
 
@@ -137,6 +146,18 @@ def _lazy_vectorstore():
         )
 
     return _vector_store
+
+
+# =========================================================
+# MANUALES EXTRA (subida manual de PDF desde el chat)
+# =========================================================
+#
+# Función adicional, aislada de la indexación automática:
+# usa su propia base Chroma y su propia carpeta (ver src/extra_docs.py).
+
+extra_docs = ExtraDocs(
+    embeddings_provider=_lazy_embeddings
+)
 
 
 # =========================================================
@@ -698,7 +719,10 @@ def chat(
     try:
 
         resultado = rag_pipeline(
-            _lazy_vectorstore(),
+            CombinedVectorStore(
+                _lazy_vectorstore(),
+                extra_docs,
+            ),
             _lazy_llm(),
             _lazy_prompt_template(),
             pregunta,
@@ -808,6 +832,111 @@ def chat(
             0,
         ),
     }
+
+
+# =========================================================
+# MANUALES EXTRA (subida manual de PDF)
+# =========================================================
+
+
+def _exigir_clave(token: str | None) -> None:
+    """Si UPLOAD_TOKEN está definido, exige la clave."""
+
+    if not token_valido(token):
+        raise HTTPException(
+            status_code=401,
+            detail="Se requiere la clave para modificar los manuales extra.",
+        )
+
+
+@app.get("/api/extra-docs")
+def listar_extra_docs():
+    """Manuales extra subidos manualmente."""
+
+    return {
+        "documentos": extra_docs.listar(),
+        "max_mb": MAX_UPLOAD_MB,
+    }
+
+
+@app.post("/api/extra-docs")
+async def subir_extra_doc(
+    request: Request,
+    nombre: str,
+    x_upload_token: str | None = Header(default=None),
+):
+    """
+    Recibe un PDF (cuerpo de la petición = bytes del archivo) y lo agrega
+    como referencia extra, sin tocar la indexación automática.
+    """
+
+    _exigir_clave(x_upload_token)
+
+    limite = (
+        f"El PDF supera el máximo permitido ({MAX_UPLOAD_MB} MB)."
+    )
+
+    declarado = request.headers.get("content-length", "")
+
+    if declarado.isdigit() and int(declarado) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=limite)
+
+    recibido = bytearray()
+
+    async for bloque in request.stream():
+        recibido.extend(bloque)
+
+        if len(recibido) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail=limite)
+
+    if not recibido:
+        raise HTTPException(
+            status_code=400,
+            detail="No se recibió ningún archivo.",
+        )
+
+    try:
+        resultado = await run_in_threadpool(
+            extra_docs.agregar_pdf,
+            nombre,
+            bytes(recibido),
+        )
+
+    except ExtraDocsError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        )
+
+    except Exception:
+        logger.exception("Error indexando un manual extra.")
+
+        raise HTTPException(
+            status_code=500,
+            detail="No fue posible indexar el documento.",
+        )
+
+    return {"ok": True, **resultado}
+
+
+@app.delete("/api/extra-docs/{nombre}")
+def eliminar_extra_doc(
+    nombre: str,
+    x_upload_token: str | None = Header(default=None),
+):
+    """Quita un manual extra (no afecta los PDF de data/pdfs)."""
+
+    _exigir_clave(x_upload_token)
+
+    quitados = extra_docs.eliminar(nombre)
+
+    if quitados is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No existe ese manual extra.",
+        )
+
+    return {"ok": True, "fragmentos_quitados": quitados}
 
 
 # =========================================================
