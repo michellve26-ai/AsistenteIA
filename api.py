@@ -667,11 +667,7 @@ def chat(
     ):
 
         return {
-            "respuesta": (
-                "¡Hola! 👋 Soy AstreaS, "
-                "tu asistente virtual de soporte técnico. "
-                "¿En qué puedo ayudarte hoy?"
-            ),
+            "respuesta": "Hola 👋 ¿En qué puedo ayudarte?",
             "fuentes": [],
             "tipo": "saludo",
             "tools_usadas": [],
