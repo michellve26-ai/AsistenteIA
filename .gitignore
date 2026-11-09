@@ -5,6 +5,9 @@ __pycache__/
 *.pyc
 .vscode/
 .streamlit/secrets.toml
-chroma_db_extra/
+
 chroma_db/
+chroma_db_extra/
+chroma_db_minilm_l6/
+
 data/uploads/
