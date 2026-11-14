@@ -11,3 +11,5 @@ chroma_db_extra/
 chroma_db_minilm_l6/
 
 data/uploads/
+logs/
+evaluacion/resultados_agente/
