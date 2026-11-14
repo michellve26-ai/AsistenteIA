@@ -10,6 +10,7 @@ import streamlit as st
 from streamlit.errors import StreamlitAPIException
 
 from src import config
+from src.agent import ejecutar_agente, is_greeting
 from src.faqs import FAQS
 from src.ingest import load_pdfs, split_documents
 from src.rag_chain import get_llm, get_prompt_template, rag_pipeline
@@ -639,6 +640,25 @@ def render_message(message: dict, index: int, *, new: bool = False) -> None:
                         for index, source in enumerate(sources, 1):
                             st.text(f"[{index}] {source['archivo']} — Pág. {source['pagina']}")
                             st.caption(display_text(source.get("fragmento", "")))
+                web_sources = details.get("web_sources", [])
+                if web_sources:
+                    with st.expander(f"Fuentes web ({len(web_sources)})"):
+                        for source in web_sources:
+                            st.write(source.get("titulo", "Fuente publica"))
+                            st.caption(source.get("url", ""))
+                            st.caption(source.get("extracto", ""))
+                trace = details.get("tool_trace", [])
+                with st.expander(f"Herramientas utilizadas ({len(trace)})"):
+                    if not trace:
+                        st.caption("Esta respuesta no necesito herramientas.")
+                    for step in trace:
+                        st.write(f"{step.get('nombre', '?')} — {step.get('estado', '?')}")
+                        st.json(step.get("argumentos", {}))
+                    st.caption(
+                        f"LLM: {details.get('llm_calls', 0)} llamadas · "
+                        f"Tokens: {details.get('tokens', 0)} · "
+                        f"Tiempo: {details.get('seconds', 0)} s"
+                    )
                 with st.expander("Copiar respuesta"):
                     st.caption("Usa el botón de copiar del bloque.")
                     st.code(display_text(content), language=None)
@@ -653,8 +673,8 @@ def answer_question(question: str, top_k: int, index_ready: bool) -> None:
     st.session_state.messages.append({"role": "user", "content": question})
     render_message(st.session_state.messages[-1], len(st.session_state.messages) - 1)
     answer = {"role": "assistant", "content": ""}
-    details = {"sources": []}
-    if not index_ready:
+    details = {"sources": [], "web_sources": [], "tool_trace": [], "llm_calls": 0, "tokens": 0, "seconds": 0}
+    if not index_ready and not is_greeting(question):
         answer["content"] = (
             "La base de conocimiento todavía no está preparada. "
             "Puedes consultar las soluciones rápidas mientras se indexan los documentos. "
@@ -663,20 +683,28 @@ def answer_question(question: str, top_k: int, index_ready: bool) -> None:
     else:
         try:
             with st.spinner("Consultando la documentación…"):
-                embeddings = _get_embeddings()
-                llm = _get_llm()
-                prompt_template = get_prompt_template()
-                vector_store = _get_vectorstore(embeddings)
-                result = rag_pipeline(
-                    vector_store,
-                    llm,
-                    prompt_template,
-                    question,
-                    k=top_k,
-                    historial=st.session_state.messages[:-1],
-                )
+                if index_ready:
+                    embeddings = _get_embeddings()
+                    llm = _get_llm()
+                    prompt_template = get_prompt_template()
+                    vector_store = _get_vectorstore(embeddings)
+                    result = rag_pipeline(
+                        vector_store,
+                        llm,
+                        prompt_template,
+                        question,
+                        k=top_k,
+                        historial=st.session_state.messages[:-1],
+                    )
+                else:
+                    result = ejecutar_agente(None, None, question, k=top_k)
             answer["content"] = result["respuesta"]
             details["sources"] = serialize_sources(result.get("fragmentos", []))
+            details["web_sources"] = result.get("fuentes_web", [])
+            details["tool_trace"] = result.get("trazas_tools", [])
+            details["llm_calls"] = result.get("llamadas_llm", 0)
+            details["tokens"] = result.get("tokens", 0)
+            details["seconds"] = result.get("tiempo_s", 0)
         except Exception as exc:
             answer["content"] = "No fue posible completar la consulta en este momento."
             details["error"] = True
