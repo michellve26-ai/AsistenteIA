@@ -388,12 +388,12 @@ Entre las mejoras identificadas se encuentran:
 
 Esta implementacion agrega un **agente con tool calling** sin reemplazar los PDF,
 el indice ChromaDB ni el estilo de Streamlit. El pipeline fijo del Avance 2 se
-conserva como \`rag_pipeline_fijo\`; \`rag_pipeline\` expone el nuevo agente con la
+conserva como `rag_pipeline_fijo`; `rag_pipeline` expone el nuevo agente con la
 misma firma publica. Las metricas del agente estan **pendientes de ejecucion real**.
 
 ### Arquitectura y privacidad
 
-\`\`\`mermaid
+```mermaid
 flowchart TD
     A[Pregunta en Streamlit] --> B[LLM Groq: seleccion de tools]
     B --> C[buscar_en_base: ChromaDB local]
@@ -406,7 +406,7 @@ flowchart TD
     F --> B
     B --> G[Respuesta y citas diferenciadas]
     B --> H[Log local sin contenidos del corpus]
-\`\`\`
+```
 
 El sistema mantiene localmente los documentos y el indice. A Groq se envia
 la pregunta, un historial reciente limitado y los resultados acotados de
@@ -415,12 +415,12 @@ publica aprobada por los filtros de codigo.
 
 | Herramienta | Uso | Limite aplicado en codigo |
 |---|---|---|
-| \`buscar_en_base(consulta)\` | Busca informacion del manual en ChromaDB | Hasta 7 fragmentos de 850 caracteres; consulta maxima de 220 |
-| \`calcular_saldo_factura(total, abono)\` | Calcula saldo ilustrativo, no modifica facturas reales | Montos finitos de 0 a 1 billon COP |
-| \`buscar_en_web(consulta)\` | Normas y otra informacion publica vigente cuando falte en la base | Hasta 3 resultados con titulo, URL y extracto de 260 caracteres |
-| \`consultar_estado_base()\` | Comprueba existencia de indice | Solo lectura |
-| \`listar_documentos()\` | Lista manuales disponibles | Solo lectura |
-| \`buscar_solucion_rapida(consulta)\` | FAQ locales | Hasta 5 coincidencias |
+| `buscar_en_base(consulta)` | Busca informacion del manual en ChromaDB | Hasta 7 fragmentos de 850 caracteres; consulta maxima de 220 |
+| `calcular_saldo_factura(total, abono)` | Calcula saldo ilustrativo, no modifica facturas reales | Montos finitos de 0 a 1 billon COP |
+| `buscar_en_web(consulta)` | Normas y otra informacion publica vigente cuando falte en la base | Hasta 3 resultados con titulo, URL y extracto de 260 caracteres |
+| `consultar_estado_base()` | Comprueba existencia de indice | Solo lectura |
+| `listar_documentos()` | Lista manuales disponibles | Solo lectura |
+| `buscar_solucion_rapida(consulta)` | FAQ locales | Hasta 5 coincidencias |
 
 El bucle admite como maximo **5 iteraciones** y **4 herramientas por
 iteracion**. Un saludo se resuelve sin LLM ni tools. Las respuestas sin
@@ -436,55 +436,55 @@ El codigo obliga a hacer una busqueda documental antes de habilitar web,
 valida consultas para bloquear posibles datos internos (identificadores,
 credenciales y frases copiadas del corpus), fija los dominios permitidos y
 descarta URLs de otras procedencias. Dominios institucionales colombianos:
-\`dian.gov.co\`, \`gov.co\`, \`mincit.gov.co\`,
-\`funcionpublica.gov.co\`, \`sic.gov.co\`, \`ugpp.gov.co\`,
-\`mintic.gov.co\`. Cubren tributacion, regulacion y tramites oficiales.
+`dian.gov.co`, `gov.co`, `mincit.gov.co`,
+`funcionpublica.gov.co`, `sic.gov.co`, `ugpp.gov.co`,
+`mintic.gov.co`. Cubren tributacion, regulacion y tramites oficiales.
 El agente no puede agregar dominios nuevos en una llamada.
 
-Añadir **solo** en secretos del entorno de Render o archivos \`.env\`
+Añadir **solo** en secretos del entorno de Render o archivos `.env`
 privados, nunca subir claves al repositorio:
 
-\`\`\`dotenv
+```dotenv
 GROQ_API_KEY=tu_clave
 TAVILY_API_KEY=tu_clave_de_tavily
 AGENT_LOG_PATH=logs/agent_tools.jsonl
-\`\`\`
+```
 
-Sin \`TAVILY_API_KEY\`, la tool informa que la busqueda web no esta
+Sin `TAVILY_API_KEY`, la tool informa que la busqueda web no esta
 disponible, sin inventar fuentes. Los logs JSONL guardan hora, nombre de
 tool, claves y longitudes de argumentos, llamadas LLM, tokens y tiempo.
-La carpeta \`logs/\` y las salidas nuevas de Ragas estan ignoradas por Git.
+La carpeta `logs/` y las salidas nuevas de Ragas estan ignoradas por Git.
 
 ### Prueba individual sin LLM
 
-\`\`\`python
+```python
 from src.vectorstore import load_vectorstore, get_embeddings
 from src.agent_tools import create_agent_tools
 store = load_vectorstore(get_embeddings())
 tools, _ = create_agent_tools(store, k=5)
 buscar = next(t for t in tools if t.name == "buscar_en_base")
 print(buscar.invoke({"consulta": "crear factura de venta"}))
-\`\`\`
+```
 
 ### Evaluacion
 
-Se conserva \`evaluacion/evaluate_rag.py\` para el baseline del Avance 2
-y se incorpora \`evaluacion/evaluate_agent.py\`, que utiliza **las mismas
+Se conserva `evaluacion/evaluate_rag.py` para el baseline del Avance 2
+y se incorpora `evaluacion/evaluate_agent.py`, que utiliza **las mismas
 15 preguntas y referencias** y escribe en
-\`evaluacion/resultados_agente/\`. Se evaluan faithfulness,
+`evaluacion/resultados_agente/`. Se evaluan faithfulness,
 answer_relevancy, context_precision y context_recall. La comparacion
 de tiempos, tokens y llamadas al LLM se obtiene con
-\`evaluacion/benchmark_avance3.py\` y los siete casos de comportamiento
-con \`evaluacion/casos_agente.py\`. Se requieren credenciales, indice,
+`evaluacion/benchmark_avance3.py` y los siete casos de comportamiento
+con `evaluacion/casos_agente.py`. Se requieren credenciales, indice,
 dependencias del evaluador y ejecucion real para informar puntuaciones.
 
-\`\`\`sh
+```sh
 streamlit run app.py
 python -m unittest discover -s tests -p 'test_agent_avance3.py'
 python -m evaluacion.casos_agente
 python -m evaluacion.benchmark_avance3
 RAGAS_K_VALUES=5 python -m evaluacion.evaluate_agent
-\`\`\`
+```
 
 La entrega final requiere capturas reales de saludo sin tool, respuesta
 documental, tarea del dominio, web, fuentes separadas, tabla Ragas, casos
