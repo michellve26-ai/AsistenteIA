@@ -251,7 +251,7 @@ def _contextualize_question(
     return consulta
 
 
-def rag_pipeline(
+def rag_pipeline_fijo(
     vector_store,
     llm,
     prompt_template,
@@ -372,3 +372,16 @@ def rag_pipeline(
         "tipo": "rag",
         "tools_usadas": [],
     }
+
+
+def rag_pipeline(
+    vector_store,
+    llm,
+    prompt_template,
+    pregunta: str,
+    k: int = config.TOP_K,
+    historial: list | None = None,
+) -> dict:
+    """Agente del Avance 3; conserva la firma de la API y el RAG fijo para comparar."""
+    from .agent import ejecutar_agente
+    return ejecutar_agente(vector_store, llm, pregunta, k=k, historial=historial)
