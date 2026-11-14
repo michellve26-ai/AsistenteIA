@@ -18,7 +18,7 @@ from .rag_chain import RESPUESTA_SIN_CONTEXTO
 MAX_ITERATIONS = 5
 MAX_CALLS_PER_ROUND = 4
 
-AGENT_SYSTEM_PROMPT = f"""Eres Astrea, agente de soporte de OficinaPro.
+AGENT_SYSTEM_PROMPT = f"""Eres Astrea, agente de soporte de Astrea.
 Tu conocimiento para responder viene SOLO de herramientas ejecutadas, nunca de memoria.
 
 Instrucciones:
