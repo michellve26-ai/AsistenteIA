@@ -22,7 +22,7 @@ from ragas.metrics.collections import (
 )
 
 from src import config
-from src.rag_chain import get_llm, get_prompt_template, rag_pipeline
+from src.rag_chain import get_llm, get_prompt_template, rag_pipeline_fijo
 from src.vectorstore import get_embeddings, load_vectorstore
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -261,7 +261,7 @@ async def main():
                         break
                     print(f"[k={k}] Generando {item['id']}", flush=True)
                     result = await asyncio.to_thread(
-                        rag_pipeline, store, generator, template,
+                        rag_pipeline_fijo, store, generator, template,
                         item["user_input"], k, [],
                     )
                     row = {
