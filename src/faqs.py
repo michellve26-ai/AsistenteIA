@@ -30,7 +30,7 @@ La factura quedará con una cuenta por cobrar abierta y el vencimiento depender�
         "question": "¿Qué hago si se venció la resolución de facturación electrónica?",
         "keywords": "resolucion dian facturacion electronica rango prefijo consecutivo vencida",
         "answer": """
-Primero debes tener autorizado el nuevo rango en la **DIAN** y luego asociarlo en OficinaPro.
+Primero debes tener autorizado el nuevo rango en la **DIAN** y luego asociarlo en Astrea.
 
 1. Ingresa a **Configuraciones > Documentos electrónicos > Factura**.
 2. Selecciona la oficina correspondiente y el nuevo prefijo/rango.

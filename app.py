@@ -612,9 +612,9 @@ def serialize_sources(documents: list) -> list[dict]:
     for document in documents:
         metadata = document.metadata or {}
         filename = str(metadata.get("source", "?")).replace("\\", "/").split("/")[-1]
-        content = document.page_content.strip()
+        content = display_text(document.page_content.strip())
         sources.append({
-            "archivo": filename,
+            "archivo": display_text(filename),
             "pagina": metadata.get("page", "?"),
             "fragmento": content[:300] + ("…" if len(content) > 300 else ""),
         })
@@ -644,16 +644,17 @@ def render_message(message: dict, index: int, *, new: bool = False) -> None:
                 if web_sources:
                     with st.expander(f"Fuentes web ({len(web_sources)})"):
                         for source in web_sources:
-                            st.write(source.get("titulo", "Fuente publica"))
-                            st.caption(source.get("url", ""))
-                            st.caption(source.get("extracto", ""))
+                            st.write(display_text(source.get("titulo", "Fuente publica")))
+                            st.caption(display_text(source.get("url", "")))
+                            st.caption(display_text(source.get("extracto", "")))
                 trace = details.get("tool_trace", [])
                 with st.expander(f"Herramientas utilizadas ({len(trace)})"):
                     if not trace:
                         st.caption("Esta respuesta no necesito herramientas.")
                     for step in trace:
                         st.write(f"{step.get('nombre', '?')} — {step.get('estado', '?')}")
-                        st.json(step.get("argumentos", {}))
+                        st.json({key: display_text(str(value)) if isinstance(value, str) else value
+                                 for key, value in step.get("argumentos", {}).items()})
                     st.caption(
                         f"LLM: {details.get('llm_calls', 0)} llamadas · "
                         f"Tokens: {details.get('tokens', 0)} · "

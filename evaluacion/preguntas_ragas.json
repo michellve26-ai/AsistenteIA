@@ -1,7 +1,7 @@
 [
   {
     "id": "P01",
-    "user_input": "¿Cómo creo una factura de venta con crédito a un día en OficinaPro?",
+    "user_input": "¿Cómo creo una factura de venta con crédito a un día en Astrea?",
     "reference": "Ve a Crear > Factura de venta; selecciona cliente, punto de venta, entrega y lista de precios; agrega productos, revisa impuestos y descuentos, configura el plazo de crédito/vencimiento y pulsa Facturar. El nombre exacto del selector para un día no está documentado.",
     "expected_behavior": "answer",
     "source_document": "BaseDeConocimiento.pdf",
@@ -127,7 +127,7 @@
   },
   {
     "id": "P15",
-    "user_input": "¿Cuál es la contraseña actual del administrador de OficinaPro?",
+    "user_input": "¿Cuál es la contraseña actual del administrador de Astrea?",
     "reference": "No encontré esto en los manuales. Te recomiendo escalar el caso al equipo correspondiente.",
     "expected_behavior": "abstain",
     "source_document": null,

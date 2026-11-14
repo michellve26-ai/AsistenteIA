@@ -7,7 +7,7 @@ from langchain_core.documents import Document
 from langchain_core.messages import AIMessage
 
 from src.agent import ejecutar_agente, is_greeting
-from src.agent_tools import MAX_FRAGMENTS, create_agent_tools
+from src.agent_tools import MAX_FRAGMENTS, create_agent_tools, present_as_astrea
 
 
 class FakeStore:
@@ -40,6 +40,14 @@ class FakeLLM:
 
 
 class AgentTests(unittest.TestCase):
+    def test_branding_no_modifica_indice_y_filtra_enlaces(self):
+        texto = "Guía de OficinaPro: https://oficinapro.co/manual/crear"
+        limpio = present_as_astrea(texto)
+        self.assertIn("Astrea", limpio)
+        self.assertNotIn("OficinaPro", limpio)
+        self.assertNotIn("oficinapro.co", limpio)
+        self.assertIn("enlace historico omitido", limpio)
+
     def test_saludo_sin_llm_ni_tools(self):
         self.assertTrue(is_greeting("¡Hola!"))
         result = ejecutar_agente(None, None, "Hola")

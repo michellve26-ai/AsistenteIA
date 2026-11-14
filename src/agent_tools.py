@@ -41,6 +41,22 @@ class AgentToolState:
     query_fragments: list[str] = field(default_factory=list)
 
 
+def present_as_astrea(value: object) -> str:
+    """Presenta fragmentos con identidad Astrea, sin modificar los PDF ni el indice.
+
+    No reescribe URLs historicas a dominios inexistentes: las oculta si
+    contienen una marca anterior. Solo actua en texto de presentacion.
+    """
+    content = str(value or "")
+    content = re.sub(
+        r"https?://[^\s<>\]\)\"']*(?:oficinapro|oficina[-_]?pro|ofiproai)[^\s<>\]\)\"']*",
+        "[enlace historico omitido]",
+        content,
+        flags=re.I,
+    )
+    return re.sub(r"\b(?:oficina[\s_-]*pro|ofiproai)\b", "Astrea", content, flags=re.I)
+
+
 def _page(metadata: dict) -> str:
     number = metadata.get("page")
     if isinstance(number, int) and number >= 0:
@@ -50,7 +66,7 @@ def _page(metadata: dict) -> str:
 
 
 def _safe_name(value: object) -> str:
-    return PurePath(str(value or "desconocido").replace("\\", "/")).name[:100]
+    return present_as_astrea(PurePath(str(value or "desconocido").replace("\\", "/")).name[:100])
 
 
 def _allowed_url(value: str) -> bool:
@@ -123,7 +139,7 @@ def create_agent_tools(vector_store, *, k: int = 5):
 
     @tool("buscar_en_base")
     def buscar_en_base(consulta: str) -> str:
-        """Busca procedimientos de Astrea/OficinaPro en manuales locales.
+        """Busca procedimientos de Astrea en manuales locales.
 
         Usar SIEMPRE primero para preguntas de soporte, manuales y procedimientos.
         Puede invocarse varias veces con distintas consultas para dos temas.
@@ -144,7 +160,7 @@ def create_agent_tools(vector_store, *, k: int = 5):
             metadata = document.metadata or {}
             name = _safe_name(metadata.get("source"))
             page = _page(metadata)
-            content = " ".join(str(document.page_content or "").split())[:MAX_FRAGMENT_CHARS]
+            content = present_as_astrea(" ".join(str(document.page_content or "").split()))[:MAX_FRAGMENT_CHARS]
             if not content:
                 continue
             # Deduplicacion para metricas Ragas y fuentes de la interfaz.

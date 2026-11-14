@@ -1,20 +1,20 @@
-# Asistente de Soporte Técnico OficinaPro — Sistema RAG
+# Asistente de Soporte Técnico Astrea — Sistema RAG
 
 ## Descripción
 
-Este proyecto implementa un asistente de inteligencia artificial basado en **Retrieval-Augmented Generation (RAG)**, orientado a resolver consultas técnicas sobre el sistema OficinaPro a partir de una base de conocimientos documental.
+Este proyecto implementa un asistente de inteligencia artificial basado en **Retrieval-Augmented Generation (RAG)**, orientado a resolver consultas técnicas sobre el sistema Astrea a partir de una base de conocimientos documental.
 
 El asistente permite realizar consultas en lenguaje natural, recuperar información de manuales y casos documentados, generar respuestas contextualizadas y presentar las fuentes que respaldan la información.
 
 El sistema fue desarrollado en Python e integra FastAPI, ChromaDB, embeddings locales y un modelo de lenguaje a través de la API de Groq.
 
-**Aplicación pública:** https://asistente-ia-oficinapro.onrender.com
+**Aplicación pública:** [Abrir Astrea](https://asistente-ia-oficinapro.onrender.com)
 
 **Repositorio:** https://github.com/michellve26-ai/AsistenteIA
 
 ## 1. Objetivo
 
-Desarrollar e implementar un asistente de soporte técnico capaz de responder consultas sobre OficinaPro utilizando información extraída de documentos previamente seleccionados, manteniendo control sobre el corpus documental y reduciendo las respuestas no sustentadas.
+Desarrollar e implementar un asistente de soporte técnico capaz de responder consultas sobre Astrea utilizando información extraída de documentos previamente seleccionados, manteniendo control sobre el corpus documental y reduciendo las respuestas no sustentadas.
 
 ## 2. Arquitectura del sistema RAG
 
@@ -34,13 +34,13 @@ El índice vectorial y los documentos son administrados por la aplicación. El m
 
 ## 3. Base de conocimientos
 
-Para esta versión se utilizaron tres documentos relacionados con el soporte técnico de OficinaPro.
+Para esta versión se utilizaron tres documentos relacionados con el soporte técnico de Astrea.
 
 | Documento | Páginas |
 |---|---:|
 | BaseDeConociemiento.pdf | 76 |
 | CasosReales.pdf | 61 |
-| REPORTE DE EFECTIVIDAD OFIPROAI - Hoja 1.pdf | 28 |
+| Documento histórico de efectividad (nombre de archivo original conservado) | 28 |
 | **Total** | **165** |
 
 Los documentos fueron seleccionados por su relación directa con las consultas de soporte, los procedimientos del sistema y los casos documentados.
@@ -237,7 +237,7 @@ Ambas interfaces utilizan los componentes del pipeline RAG incluidos en `src/`.
 
 El proyecto se encuentra desplegado en Render como aplicación web.
 
-**URL:** https://asistente-ia-oficinapro.onrender.com
+**URL:** [Abrir Astrea](https://asistente-ia-oficinapro.onrender.com)
 
 Para reproducir el despliegue:
 
@@ -375,7 +375,7 @@ Entre las mejoras identificadas se encuentran:
 
 **Repositorio:** https://github.com/michellve26-ai/AsistenteIA
 
-**Aplicación desplegada:** https://asistente-ia-oficinapro.onrender.com
+**Aplicación desplegada:** [Abrir Astrea](https://asistente-ia-oficinapro.onrender.com)
 
 **Evaluación Ragas:** `.github/workflows/evaluacion-ragas.yml`
 
@@ -489,3 +489,6 @@ RAGAS_K_VALUES=5 python -m evaluacion.evaluate_agent
 La entrega final requiere capturas reales de saludo sin tool, respuesta
 documental, tarea del dominio, web, fuentes separadas, tabla Ragas, casos
 de comportamiento, costo y reflexion. **No se inventan capturas ni metricas.**
+
+
+> **Nota sobre la marca:** La aplicación y el agente se presentan como Astrea. El hostname histórico de Render se conserva como destino técnico para no romper el despliegue. El índice y los PDF originales no se renombraron ni se modificaron. Las preguntas de evaluación con marca anterior se normalizaron y deben evaluarse de nuevo para una comparación estricta.
