@@ -58,6 +58,14 @@ def main() -> None:
         ),
     }
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    if OUTPUT.exists():
+        previous = json.loads(OUTPUT.read_text(encoding="utf-8"))
+        if (previous.get("dataset_sha256") != manifest["dataset_sha256"]
+                or previous.get("pdfs_actuales") != manifest["pdfs_actuales"]):
+            raise SystemExit(
+                "Los hashes del corpus o las preguntas cambiaron. "
+                "No reutilizar resultados de una ejecucion anterior."
+            )
     OUTPUT.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({
         "preguntas": manifest["preguntas"],
