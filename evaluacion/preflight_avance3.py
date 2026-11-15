@@ -57,7 +57,7 @@ def main() -> None:
         "top_k": 5,
         "pdfs_actuales": [{"archivo": p.name, "sha256": hash_file(p)} for p in pdfs],
         "referencias_documentales_no_presentes": missing,
-        "comparable_con_metricas_historicas": (not bool(missing) and CORPUS_REF != "working-tree"),
+        "comparable_con_metricas_historicas": False,  # El dataset y el evaluador pueden haber cambiado.
         "comparacion_pareada_actual_permitida": (valid and not missing),
         "advertencia": (
             "La referencia documental no coincide con el corpus versionado."
