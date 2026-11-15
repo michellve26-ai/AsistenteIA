@@ -52,6 +52,7 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_agent_avance3.py' -v
           python -m unittest discover -s tests -p 'test_ragas_rate_limit.py' -v
+          python -m unittest discover -s tests -p 'test_auto_index.py' -v
       - name: Manifiesto del corpus actual
         run: python -m evaluacion.preflight_avance3
       - name: Indexar PDF en runner temporal, sin alterar Render
