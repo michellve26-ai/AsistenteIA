@@ -11,11 +11,10 @@ from streamlit.errors import StreamlitAPIException
 
 from src import config
 from src.agent import ejecutar_agente, is_greeting
+from src.auto_index import ensure_index, pdf_snapshot, manifest_stamp
 from src.faqs import FAQS
-from src.ingest import load_pdfs, split_documents
 from src.rag_chain import get_llm, get_prompt_template, rag_pipeline
 from src.vectorstore import (
-    build_vectorstore,
     get_embeddings,
     index_exists,
     load_vectorstore,
@@ -367,6 +366,31 @@ def safe_index_exists() -> bool:
         return False
 
 
+@st.cache_resource(ttl=120, show_spinner="Comprobando manuales PDF…")
+def _checked_auto_sync(snapshot, manifest_revision):
+    """Evita recalcular SHA-256 en cada mensaje; vuelve a comprobar al cambiar PDF."""
+    return ensure_index(_get_embeddings)
+
+
+def _auto_sync_index() -> None:
+    """Comprobar PDF al iniciar/rerun; publicar solo indices completos."""
+    try:
+        snapshot = pdf_snapshot()
+        if not snapshot:
+            return
+        changed = _checked_auto_sync(snapshot, manifest_stamp())
+        if changed:
+            _get_vectorstore.clear()
+            st.session_state.astrea_notice = "Manuales PDF sincronizados automáticamente."
+    except Exception as exc:
+        # No romper el chat ni borrar el indice anterior si falla la indexacion.
+        print(f"[AUTO-INDEX] Sincronizacion pendiente: {type(exc).__name__}: {exc}", flush=True)
+        st.session_state.astrea_index_warning = (
+            "No se pudo completar la actualización automática de los PDF. "
+            "El índice anterior, si existe, permanece disponible."
+        )
+
+
 for name, default in (
     ("messages", []),
     ("main_view", "Chat"),
@@ -489,11 +513,8 @@ def render_sidebar(index_ready: bool) -> int:
             ):
                 try:
                     with st.spinner("Procesando documentos…"):
-                        embeddings = _get_embeddings()
-                        documents = load_pdfs()
-                        chunks = split_documents(documents)
-                        build_vectorstore(chunks, embeddings, rebuild=True)
-                    st.cache_resource.clear()
+                        ensure_index(_get_embeddings, force=True)
+                    _get_vectorstore.clear()
                     st.session_state.astrea_notice = "Índice actualizado correctamente."
                     st.rerun()
                 except Exception as exc:
@@ -813,12 +834,16 @@ def render_solutions() -> None:
 
 
 render_icon_styles()
+_auto_sync_index()
 index_ready = safe_index_exists()
 top_k = render_sidebar(index_ready)
 render_header(index_ready)
 notice = st.session_state.pop("astrea_notice", None)
 if notice:
     st.success(notice)
+warning = st.session_state.pop("astrea_index_warning", None)
+if warning:
+    st.warning(warning)
 if st.session_state.main_view == "Soluciones rápidas":
     render_solutions()
 else:
