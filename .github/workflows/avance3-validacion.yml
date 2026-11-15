@@ -1,6 +1,9 @@
 name: Astrea Avance 3 - Validacion reproducible
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
@@ -29,6 +32,7 @@ permissions:
 
 jobs:
   codigo:
+    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ragas-resume]')
     name: Codigo, tests y preflight sin secretos
     runs-on: ubuntu-24.04
     timeout-minutes: 55
@@ -81,12 +85,13 @@ jobs:
           retention-days: 30
 
   reales:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[ragas-resume]'))
     needs: codigo
     name: Herramientas reales, comportamiento y metricas
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     env:
+      RAGAS_RESUME_RUN_ID: ${{ github.event_name == 'push' && '43663504130' || inputs.resume_run_id }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
       PERSIST_DIR: /tmp/astrea_avance3_chroma
@@ -119,11 +124,11 @@ jobs:
           if [ -z "$TAVILY_API_KEY" ]; then echo "TAVILY_API_KEY ausente: caso web se validara con la captura de Render; agregar secreto para workflow completo"; fi
           echo "Secretos presentes; no se imprimen"
       - name: Recuperar resultados anteriores (opcional)
-        if: inputs.resume_run_id != ''
+        if: env.RAGAS_RESUME_RUN_ID != ''
         uses: actions/download-artifact@v4
         with:
           name: avance3-resultados
-          run-id: ${{ inputs.resume_run_id }}
+          run-id: ${{ env.RAGAS_RESUME_RUN_ID }}
           path: evaluacion/resultados_avance3
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Recuperar PDF historicos de Avance 2 SOLO en el runner
@@ -171,18 +176,18 @@ jobs:
       - name: Prueba real de buscar_en_base.invoke sin LLM
         run: python -m evaluacion.prueba_tool_base
       - name: Ejecutar los siete casos reales (solo corrida nueva)
-        if: inputs.resume_run_id == ''
+        if: env.RAGAS_RESUME_RUN_ID == ''
         run: python -m evaluacion.casos_agente
       - name: Comparar llamadas, tokens y tiempos (solo corrida nueva)
-        if: inputs.resume_run_id == ''
+        if: env.RAGAS_RESUME_RUN_ID == ''
         run: python -m evaluacion.benchmark_avance3
       - name: Instalar dependencias del juez Ragas
-        if: inputs.nivel == 'full'
+        if: inputs.nivel == 'full' || github.event_name == 'push'
         run: |
           python -m pip install "ragas==0.4.3" "langchain-community==0.4.1" groq instructor pandas
           python -m pip check
       - name: Validar correspondencia de referencias antes de Ragas
-        if: inputs.nivel == 'full'
+        if: inputs.nivel == 'full' || github.event_name == 'push'
         shell: bash
         run: |
           python - <<'PY'
@@ -198,14 +203,14 @@ jobs:
           print("Nombres de referencias presentes; aun revisar la correspondencia de contenido.")
           PY
       - name: Re-evaluar pipeline fijo sin recalcular notas guardadas
-        if: inputs.nivel == 'full'
+        if: inputs.nivel == 'full' || github.event_name == 'push'
         continue-on-error: true
         env:
           RAGAS_OUTPUT_DIR: evaluacion/resultados_avance3/fijo
           RAGAS_STRICT_COMPLETION: "true"
         run: python -m evaluacion.evaluate_rag
       - name: Evaluar agente sin recalcular notas guardadas
-        if: inputs.nivel == 'full'
+        if: inputs.nivel == 'full' || github.event_name == 'push'
         continue-on-error: true
         env:
           RAGAS_OUTPUT_DIR: evaluacion/resultados_avance3/agente
@@ -223,7 +228,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
       - name: Verificar que Ragas esta completo en ambos sistemas
-        if: always() && inputs.nivel == 'full'
+        if: always() && (inputs.nivel == 'full' || github.event_name == 'push')
         shell: bash
         run: |
           python - <<'PY'
