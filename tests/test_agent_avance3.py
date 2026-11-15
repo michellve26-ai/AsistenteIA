@@ -116,5 +116,120 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(result["fuentes_web"], [])
 
 
+    def test_web_resultados_y_error_modelo_no_afirma_que_no_hay_fuentes(self):
+        """Groq puede fallar DESPUES de la recuperacion de fuentes oficiales."""
+        import json
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, limit):
+                return json.dumps({"results": [{
+                    "title": "Anexo tecnico DIAN",
+                    "url": "https://www.dian.gov.co/facturacion/anexo.pdf",
+                    "content": "Resolucion y documento de referencia",
+                }]}).encode("utf-8")
+
+        class FailAfterWeb:
+            def __init__(self):
+                self.count = 0
+
+            def invoke(self, messages):
+                self.count += 1
+                if self.count == 1:
+                    return AIMessage(content="", tool_calls=[{
+                        "name": "buscar_en_base", "args": {"consulta": "facturacion DIAN"}, "id": "base_1",
+                    }])
+                if self.count == 2:
+                    return AIMessage(content="", tool_calls=[{
+                        "name": "buscar_en_web",
+                        "args": {"consulta": "anexo facturacion electronica DIAN"},
+                        "id": "web_1",
+                    }])
+                raise RuntimeError("Groq 429")
+
+        class FakeWebLLM:
+            def bind_tools(self, tools):
+                return FailAfterWeb()
+
+        with (patch.dict(os.environ, {"TAVILY_API_KEY": "prueba"}),
+              patch("src.agent_tools.urlopen", return_value=FakeResponse()),
+              patch("src.agent.record_agent_run")):
+            result = ejecutar_agente(FakeStore(), FakeWebLLM(), "Anexo de facturacion DIAN")
+
+        self.assertEqual(result["tipo"], "error_llm")
+        self.assertEqual(result["llamadas_llm"], 2)
+        self.assertEqual(len(result["fuentes_web"]), 1)
+        self.assertIn("https://www.dian.gov.co/facturacion/anexo.pdf", result["respuesta"])
+        self.assertIn("no pude", result["respuesta"].lower())
+        self.assertNotIn("No encontré esto en los manuales", result["respuesta"])
+        self.assertEqual([step["nombre"] for step in result["trazas_tools"]],
+                         ["buscar_en_base", "buscar_en_web"])
+
+    def test_modelo_vacio_con_fuentes_explica_limite(self):
+        from langchain_core.documents import Document
+        from src.agent import _respuesta_con_fuentes_o_error
+        web = [{"titulo": "Anexo DIAN",
+                "url": "https://www.dian.gov.co/tema/documento.pdf"},
+               {"titulo": "Malicioso", "url": "https://evil.example/secret"}]
+        mensaje = _respuesta_con_fuentes_o_error([], web)
+        self.assertIn("www.dian.gov.co", mensaje)
+        self.assertNotIn("evil.example", mensaje)
+        self.assertIn("No puedo confirmar", mensaje)
+        self.assertNotIn("No encontré esto", mensaje)
+        manuales = _respuesta_con_fuentes_o_error([Document(
+            page_content="ejemplo", metadata={"source": "manual.pdf"}
+        )], [])
+        self.assertIn("Encontré fragmentos", manuales)
+        self.assertNotIn("No encontré esto", manuales)
+
+    def test_modelo_devuelve_respuesta_generica_tras_busqueda(self):
+        from src.rag_chain import RESPUESTA_SIN_CONTEXTO
+        llm = FakeLLM([
+            AIMessage(content="", tool_calls=[{
+                "name": "buscar_en_base",
+                "args": {"consulta": "crear factura"}, "id": "base_1"
+            }]),
+            AIMessage(content=RESPUESTA_SIN_CONTEXTO),
+        ])
+        with patch("src.agent.record_agent_run"):
+            result = ejecutar_agente(FakeStore(), llm, "Crear factura")
+        self.assertEqual(result["tipo"], "agente")
+        self.assertIn("Encontré fragmentos", result["respuesta"])
+        self.assertEqual(len(result["fragmentos"]), 1)
+
+    def test_limite_iteraciones_con_documentos_no_pierde_evidencia(self):
+        messages = [
+            AIMessage(content="", tool_calls=[{
+                "name": "buscar_en_base",
+                "args": {"consulta": f"factura {i}"}, "id": f"base_{i}"
+            }]) for i in range(5)
+        ]
+        with patch("src.agent.record_agent_run"):
+            result = ejecutar_agente(FakeStore(), FakeLLM(messages), "Crear factura")
+        self.assertEqual(result["tipo"], "limite_iteraciones")
+        self.assertIn("Encontré fragmentos", result["respuesta"])
+        self.assertEqual(result["iteraciones"], 5)
+
+    def test_error_llm_sin_evidencia_no_inventa_fuentes(self):
+        class BrokenLLM:
+            def bind_tools(self, tools):
+                class Broken:
+                    def invoke(self, messages):
+                        raise RuntimeError("Groq temporalmente limitado")
+                return Broken()
+
+        with patch("src.agent.record_agent_run"):
+            result = ejecutar_agente(FakeStore(), BrokenLLM(), "norma DIAN")
+        self.assertEqual(result["tipo"], "error_llm")
+        self.assertIn("modelo no respondió", result["respuesta"])
+        self.assertEqual(result["fuentes_web"], [])
+        self.assertEqual(result["fragmentos"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
