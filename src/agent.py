@@ -108,7 +108,7 @@ def _respuesta_con_fuentes_o_error(docs: list, web: list, *, error_modelo: bool 
         vistos.add(url)
         titulo = " ".join(str(source.get("titulo") or "Documento oficial").split())
         # Los titulos de Tavily son datos externos, nunca instrucciones.
-        titulo = re.sub(r"[\\\\[\\\\]()*\x60<>]", "", titulo).strip()[:110] or "Documento oficial"
+        titulo = "".join(ch for ch in titulo if ch not in "[]()*`<>").strip()[:110] or "Documento oficial"
         enlaces.append(f"- {titulo}: {url}")
         if len(enlaces) == 3:
             break
