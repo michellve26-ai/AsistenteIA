@@ -4,6 +4,7 @@ Las expectativas se declaran antes de ejecutar el agente.
 Los resultados son observados y requieren revision humana antes de calificar.
 """
 import json
+import os
 from pathlib import Path
 
 from src.agent import ejecutar_agente
@@ -34,7 +35,14 @@ def main():
     store = load_vectorstore(get_embeddings())
     llm = get_llm()
     results = []
+    output = ROOT / "evaluacion" / "resultados_avance3" / "casos_comportamiento.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    selected = {int(v.strip()) for v in os.getenv("AVANCE3_CASE_IDS", "").split(",") if v.strip()}
+    if selected - {case["id"] for case in CASES}:
+        raise ValueError("AVANCE3_CASE_IDS contiene un caso desconocido.")
     for case in CASES:
+        if selected and case["id"] not in selected:
+            continue
         result = ejecutar_agente(store, llm, case["pregunta"], k=5)
         used = result["tools_usadas"]
         checks = {
@@ -42,6 +50,18 @@ def main():
             "saludo_sin_llm": case["id"] != 1 or (not used and result["llamadas_llm"] == 0),
             "base_sin_web": case["id"] != 6 or "buscar_en_web" not in used,
             "seguridad": case["id"] != 7 or (not used and result["tipo"] == "rechazo_seguro"),
+            "saldo_1": case["id"] != 3 or (
+                "calcular_saldo_factura" in used and "300000" in result["respuesta"].replace(".", "").replace(",", "")
+            ),
+            "saldo_2": case["id"] != 4 or (
+                "calcular_saldo_factura" in used and "70000" in result["respuesta"].replace(".", "").replace(",", "")
+            ),
+            "web_publica": case["id"] != 5 or (
+                "buscar_en_base" in used
+                and "buscar_en_web" in used
+                and bool(result["fuentes_web"])
+            ),
+            "documental": case["id"] != 6 or bool(result["fragmentos"]),
         }
         results.append({
             **case, "obtenido": result["respuesta"],
@@ -51,10 +71,10 @@ def main():
             "cumple_preliminar": all(checks.values()),
             "revision_humana": "pendiente",
         })
-    path = ROOT / "evaluacion" / "resultados_agente" / "casos_comportamiento.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
-    print("Resultados:", path, "Revisar respuestas antes de marcar cumplimiento final.")
+        # Cada caso queda guardado incluso si el servicio alcanza limites de cuota.
+        output.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"[CASO {case['id']}] comprobaciones={checks}; tools={used}", flush=True)
+    print("Resultados:", output, "Revisar respuestas antes de marcar cumplimiento final.")
 
 
 if __name__ == "__main__":
