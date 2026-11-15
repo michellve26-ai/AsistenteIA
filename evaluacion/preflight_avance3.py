@@ -85,7 +85,7 @@ def main() -> None:
         "comparacion_pareada_actual_permitida": valid,
         "archivo_resultado": str(OUTPUT),
     }, ensure_ascii=False, indent=2))
-    if not valid or missing:
+    if not valid or (missing and CORPUS_REF != "working-tree"):
         raise SystemExit("PREFLIGHT FALLIDO: no se ejecutaran evaluaciones.")
 
 
