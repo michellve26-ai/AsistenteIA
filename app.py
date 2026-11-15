@@ -367,7 +367,7 @@ def safe_index_exists() -> bool:
 
 
 @st.cache_resource(ttl=120, show_spinner="Comprobando manuales PDF…")
-def _checked_auto_sync(_stamp, _manifest_stamp):
+def _checked_auto_sync(snapshot, manifest_revision):
     """Evita recalcular SHA-256 en cada mensaje; vuelve a comprobar al cambiar PDF."""
     return ensure_index(_get_embeddings)
 
