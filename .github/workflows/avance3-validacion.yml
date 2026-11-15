@@ -44,8 +44,10 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Sintaxis
         run: python -m compileall -q src evaluacion tests app.py
-      - name: Nueve pruebas unitarias sin LLM
-        run: python -m unittest discover -s tests -p 'test_agent_avance3.py' -v
+      - name: Pruebas unitarias del agente y del control de cuota, sin LLM
+        run: |
+          python -m unittest discover -s tests -p 'test_agent_avance3.py' -v
+          python -m unittest discover -s tests -p 'test_ragas_rate_limit.py' -v
       - name: Manifiesto del corpus actual
         run: python -m evaluacion.preflight_avance3
       - name: Indexar PDF en runner temporal, sin alterar Render
@@ -79,7 +81,7 @@ jobs:
           retention-days: 30
 
   reales:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+    if: github.event_name == 'workflow_dispatch'
     needs: codigo
     name: Herramientas reales, comportamiento y metricas
     runs-on: ubuntu-24.04
@@ -92,13 +94,16 @@ jobs:
       AVANCE3_PDF_DIR: data/pdfs_historicos
       AVANCE3_CORPUS_REF: c9d0b617cfe2120ee41c3525b89ffa692b4ca9fe
       RAGAS_K_VALUES: "5"
-      RAGAS_MAX_OPERATIONS: "70"
-      RAGAS_PAUSE_SECONDS: "20"
-      RAGAS_MAX_RATE_RETRIES: "5"
-      RAGAS_MAX_WAIT_SECONDS: "120"
+      RAGAS_MAX_OPERATIONS: "110"
+      RAGAS_PAUSE_SECONDS: "45"
+      RAGAS_MAX_RATE_RETRIES: "12"
+      RAGAS_MAX_WAIT_SECONDS: "240"
+      RAGAS_JUDGE_MODEL: "openai/gpt-oss-20b"
+      RAGAS_JUDGE_MODE: "MD_JSON"
+      RAGAS_JUDGE_MAX_TOKENS: "4096"
+      RAGAS_REASONING_EFFORT: "low"
       RAGAS_RETRY_JSON_ERRORS: "true"
       PYTHONUNBUFFERED: "1"
-      AVANCE3_CASE_IDS: ${{ github.event_name == 'pull_request' && '1,2,3,4,6,7' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -165,10 +170,11 @@ jobs:
           PY
       - name: Prueba real de buscar_en_base.invoke sin LLM
         run: python -m evaluacion.prueba_tool_base
-      - name: Ejecutar los siete casos reales
+      - name: Ejecutar los siete casos reales (solo corrida nueva)
+        if: inputs.resume_run_id == ''
         run: python -m evaluacion.casos_agente
-      - name: Comparar llamadas, tokens y tiempos
-        if: github.event_name == 'workflow_dispatch'
+      - name: Comparar llamadas, tokens y tiempos (solo corrida nueva)
+        if: inputs.resume_run_id == ''
         run: python -m evaluacion.benchmark_avance3
       - name: Instalar dependencias del juez Ragas
         if: inputs.nivel == 'full'
@@ -191,15 +197,19 @@ jobs:
               )
           print("Nombres de referencias presentes; aun revisar la correspondencia de contenido.")
           PY
-      - name: Re-evaluar pipeline fijo sobre el corpus actual
+      - name: Re-evaluar pipeline fijo sin recalcular notas guardadas
         if: inputs.nivel == 'full'
+        continue-on-error: true
         env:
           RAGAS_OUTPUT_DIR: evaluacion/resultados_avance3/fijo
+          RAGAS_STRICT_COMPLETION: "true"
         run: python -m evaluacion.evaluate_rag
-      - name: Evaluar agente sobre el MISMO corpus actual
+      - name: Evaluar agente sin recalcular notas guardadas
         if: inputs.nivel == 'full'
+        continue-on-error: true
         env:
           RAGAS_OUTPUT_DIR: evaluacion/resultados_avance3/agente
+          RAGAS_STRICT_COMPLETION: "true"
         run: python -m evaluacion.evaluate_agent
       - name: Generar resumen de evidencia real o pendiente
         if: always()
@@ -212,3 +222,32 @@ jobs:
           path: evaluacion/resultados_avance3/
           if-no-files-found: warn
           retention-days: 30
+      - name: Verificar que Ragas esta completo en ambos sistemas
+        if: always() && inputs.nivel == 'full'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          base = Path("evaluacion/resultados_avance3")
+          incompletas = []
+          for mode in ("fijo", "agente"):
+              p = base / mode / "resumen_k5.json"
+              if not p.exists():
+                  incompletas.append(f"{mode}: sin resumen")
+                  continue
+              data = json.loads(p.read_text(encoding="utf-8"))
+              if data.get("preguntas_respondidas") != 15:
+                  incompletas.append(f"{mode}: respuestas incompletas")
+              for name, score in data.get("metricas", {}).items():
+                  count = score.get("evaluadas", 0)
+                  if count != 12 or score.get("esperadas") != 12:
+                      incompletas.append(f"{mode}: {name} = {count}/12")
+              if len(data.get("metricas", {})) != 4:
+                  incompletas.append(f"{mode}: faltan metricas")
+          if incompletas:
+              print("RAGAS PARCIAL - artefacto guardado; reanudar con el ID de esta corrida")
+              print("\n".join(incompletas))
+              raise SystemExit(1)
+          print("RAGAS COMPLETO: 12/12 en las cuatro metricas de ambos sistemas.")
+          PY
