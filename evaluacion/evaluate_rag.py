@@ -27,7 +27,7 @@ from src.vectorstore import get_embeddings, load_vectorstore
 
 ROOT = Path(__file__).resolve().parents[1]
 DATASET_PATH = ROOT / "evaluacion" / "preguntas_ragas.json"
-OUTPUT_DIR = ROOT / "evaluacion" / "resultados"
+OUTPUT_DIR = Path(os.getenv("RAGAS_OUTPUT_DIR", str(ROOT / "evaluacion" / "resultados"))).resolve()
 METRIC_NAMES = ("faithfulness", "answer_relevancy", "context_precision", "context_recall")
 NO_ENCONTRADO = (
     "No encontré esto en los manuales. "
@@ -173,7 +173,7 @@ def summarize(k, rows, scores, expected_ids):
         valid = [v for v in values if v is not None]
         out["metricas"][name] = {
             "promedio": round(sum(valid) / len(valid), 4) if valid else None,
-            "evaluadas": len(valid), "esperadas": sum(r["expected_behavior"] == "answer" for r in expected_ids),
+            "evaluadas": len(valid), "esperadas": sum(r["expected_behavior"] == "answer" for r in rows),
         }
     return out
 
@@ -250,6 +250,10 @@ async def main():
             expected_ids = [q["id"] for q in questions]
             if [r["id"] for r in rows] != expected_ids[:len(rows)]:
                 raise RuntimeError(f"respuestas_k{k} no coincide con el dataset actual")
+            for saved, current in zip(rows, questions):
+                if (saved.get("question") != current["user_input"]
+                        or saved.get("ground_truth") != current["reference"]):
+                    raise RuntimeError("Dataset o referencias cambiaron: no reutilizar resultados previos")
             scores = read_scores(scores_path)
             saved_lookup = {r["id"]: r for r in rows}
             if ONLY_IDS and len(rows) != len(questions):

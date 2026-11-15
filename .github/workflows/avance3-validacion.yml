@@ -1,0 +1,214 @@
+name: Astrea Avance 3 - Validacion reproducible
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "evaluacion/**"
+      - ".github/workflows/avance3-validacion.yml"
+  workflow_dispatch:
+    inputs:
+      nivel:
+        description: "Pruebas reales sin Ragas (smoke) o completas con Ragas (full)"
+        required: true
+        type: choice
+        options:
+          - smoke
+          - full
+        default: smoke
+      resume_run_id:
+        description: "ID opcional de run previo para continuar evaluacion (artefacto avance3-resultados)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  codigo:
+    name: Codigo, tests y preflight sin secretos
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      PERSIST_DIR: /tmp/astrea_avance3_ci_index
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Dependencias
+        run: python -m pip install -r requirements.txt
+      - name: Sintaxis
+        run: python -m compileall -q src evaluacion tests app.py
+      - name: Nueve pruebas unitarias sin LLM
+        run: python -m unittest discover -s tests -p 'test_agent_avance3.py' -v
+      - name: Manifiesto del corpus actual
+        run: python -m evaluacion.preflight_avance3
+      - name: Indexar PDF en runner temporal, sin alterar Render
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from src import config
+          from src.ingest import load_pdfs, split_documents
+          from src.vectorstore import get_embeddings, build_vectorstore
+          location = Path(config.PERSIST_DIR)
+          if location.exists():
+              raise SystemExit("El indice temporal ya existe, no se sobreescribira.")
+          chunks = split_documents(load_pdfs())
+          if not chunks:
+              raise SystemExit("No se pudieron extraer fragmentos de los PDF")
+          store = build_vectorstore(chunks, get_embeddings(), rebuild=False)
+          print("Indice temporal creado:", store._collection.count(), flush=True)
+          PY
+      - name: Prueba real .invoke sin LLM
+        run: python -m evaluacion.prueba_tool_base
+      - name: Subir evidencia preliminar
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avance3-preflight
+          path: |
+            evaluacion/resultados_avance3/preflight.json
+            evaluacion/resultados_avance3/prueba_buscar_en_base.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  reales:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+    needs: codigo
+    name: Herramientas reales, comportamiento y metricas
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+      PERSIST_DIR: /tmp/astrea_avance3_chroma
+      PDF_DIR: data/pdfs_historicos
+      AVANCE3_PDF_DIR: data/pdfs_historicos
+      AVANCE3_CORPUS_REF: c9d0b617cfe2120ee41c3525b89ffa692b4ca9fe
+      RAGAS_K_VALUES: "5"
+      RAGAS_MAX_OPERATIONS: "70"
+      RAGAS_PAUSE_SECONDS: "20"
+      RAGAS_MAX_RATE_RETRIES: "5"
+      RAGAS_MAX_WAIT_SECONDS: "120"
+      RAGAS_RETRY_JSON_ERRORS: "true"
+      PYTHONUNBUFFERED: "1"
+      AVANCE3_CASE_IDS: ${{ github.event_name == 'pull_request' && '1,2,3,4,6,7' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Instalar dependencias de ejecucion
+        run: python -m pip install -r requirements.txt
+      - name: Verificar credenciales sin mostrar valores
+        shell: bash
+        run: |
+          test -n "$GROQ_API_KEY" || (echo "Falta secret GROQ_API_KEY"; exit 1)
+          if [ -z "$TAVILY_API_KEY" ]; then echo "TAVILY_API_KEY ausente: caso web se validara con la captura de Render; agregar secreto para workflow completo"; fi
+          echo "Secretos presentes; no se imprimen"
+      - name: Recuperar resultados anteriores (opcional)
+        if: inputs.resume_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: avance3-resultados
+          run-id: ${{ inputs.resume_run_id }}
+          path: evaluacion/resultados_avance3
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Recuperar PDF historicos de Avance 2 SOLO en el runner
+        shell: bash
+        run: |
+          git fetch --no-tags --depth=1 origin c9d0b617cfe2120ee41c3525b89ffa692b4ca9fe
+          python - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+          ref = os.environ["AVANCE3_CORPUS_REF"]
+          dest = Path(os.environ["PDF_DIR"])
+          dest.mkdir(parents=True, exist_ok=True)
+          docs = (
+              "BaseDeConociemiento.pdf",
+              "CasosReales.pdf",
+              "REPORTE DE EFECTIVIDAD OFIPROAI - Hoja 1.pdf",
+          )
+          for name in docs:
+              output = subprocess.check_output(
+                  ["git", "show", f"{ref}:data/pdfs/{name}"]
+              )
+              (dest / name).write_bytes(output)
+              print("Documento historico recuperado:", name, len(output), "bytes")
+          PY
+      - name: Preflight y hashes de los PDF
+        run: python -m evaluacion.preflight_avance3
+      - name: Crear indice TEMPORAL en GitHub Actions; no alterar Render
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from src.ingest import load_pdfs, split_documents
+          from src.vectorstore import get_embeddings, build_vectorstore
+          from src import config
+          target = Path(config.PERSIST_DIR)
+          if target.exists():
+              raise SystemExit("El directorio temporal ya existe; no se sobreescribira.")
+          chunks = split_documents(load_pdfs())
+          if not chunks:
+              raise SystemExit("No hay fragmentos para evaluar.")
+          store = build_vectorstore(chunks, get_embeddings(), rebuild=False)
+          print("Fragmentos en indice aislado:", store._collection.count(), flush=True)
+          PY
+      - name: Prueba real de buscar_en_base.invoke sin LLM
+        run: python -m evaluacion.prueba_tool_base
+      - name: Ejecutar los siete casos reales
+        run: python -m evaluacion.casos_agente
+      - name: Comparar llamadas, tokens y tiempos
+        if: github.event_name == 'workflow_dispatch'
+        run: python -m evaluacion.benchmark_avance3
+      - name: Instalar dependencias del juez Ragas
+        if: inputs.nivel == 'full'
+        run: |
+          python -m pip install "ragas==0.4.3" "langchain-community==0.4.1" groq instructor pandas
+          python -m pip check
+      - name: Validar correspondencia de referencias antes de Ragas
+        if: inputs.nivel == 'full'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path("evaluacion/resultados_avance3/preflight.json").read_text(encoding="utf-8"))
+          missing = manifest.get("referencias_documentales_no_presentes", [])
+          if missing:
+              raise SystemExit(
+                  "No se ejecutara Ragas: las referencias mencionan documentos ausentes "
+                  "del corpus versionado. Resolver primero: " + ", ".join(missing)
+              )
+          print("Nombres de referencias presentes; aun revisar la correspondencia de contenido.")
+          PY
+      - name: Re-evaluar pipeline fijo sobre el corpus actual
+        if: inputs.nivel == 'full'
+        env:
+          RAGAS_OUTPUT_DIR: evaluacion/resultados_avance3/fijo
+        run: python -m evaluacion.evaluate_rag
+      - name: Evaluar agente sobre el MISMO corpus actual
+        if: inputs.nivel == 'full'
+        env:
+          RAGAS_OUTPUT_DIR: evaluacion/resultados_avance3/agente
+        run: python -m evaluacion.evaluate_agent
+      - name: Generar resumen de evidencia real o pendiente
+        if: always()
+        run: python -m evaluacion.resumen_avance3
+      - name: Descargar resultados JSON, CSV y resumen
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avance3-resultados
+          path: evaluacion/resultados_avance3/
+          if-no-files-found: warn
+          retention-days: 30
