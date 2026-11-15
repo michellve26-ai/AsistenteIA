@@ -9,23 +9,23 @@ import re
 
 
 def quota_delay_seconds(error: BaseException) -> float | None:
-    """Convierte los plazos de 'Please try again in ...' a segundos."""
+    """Convierte plazos Groq en ms, s, m o h sin confundir 'ms' con minutos."""
     message = str(error)
     match = re.search(
         r"(?:please\s+)?try again in\s+"
-        r"(?:(?P<h>\d+(?:\.\d+)?)h\s*)?"
-        r"(?:(?P<m>\d+(?:\.\d+)?)m\s*)?"
-        r"(?:(?P<s>\d+(?:\.\d+)?)s|(?P<ms>\d+(?:\.\d+)?)ms)?",
+        r"(?P<duration>(?:\d+(?:\.\d+)?(?:ms|h|m|s)\s*)+)",
         message,
         flags=re.IGNORECASE,
     )
-    if match and any(match.group(x) is not None for x in ("h", "m", "s", "ms")):
-        return (
-            float(match.group("h") or 0) * 3600
-            + float(match.group("m") or 0) * 60
-            + float(match.group("s") or 0)
-            + float(match.group("ms") or 0) / 1000
+    if match:
+        units = re.findall(
+            r"(\d+(?:\.\d+)?)(ms|h|m|s)",
+            match.group("duration"),
+            flags=re.IGNORECASE,
         )
+        factors = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
+        if units:
+            return sum(float(value) * factors[unit.lower()] for value, unit in units)
     headers = getattr(getattr(error, "response", None), "headers", None)
     if headers:
         try:
