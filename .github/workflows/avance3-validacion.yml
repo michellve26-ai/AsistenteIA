@@ -31,7 +31,9 @@ jobs:
   codigo:
     name: Codigo, tests y preflight sin secretos
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 55
+    env:
+      PERSIST_DIR: /tmp/astrea_avance3_ci_index
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -46,12 +48,33 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_agent_avance3.py' -v
       - name: Manifiesto del corpus actual
         run: python -m evaluacion.preflight_avance3
+      - name: Indexar PDF en runner temporal, sin alterar Render
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from src import config
+          from src.ingest import load_pdfs, split_documents
+          from src.vectorstore import get_embeddings, build_vectorstore
+          location = Path(config.PERSIST_DIR)
+          if location.exists():
+              raise SystemExit("El indice temporal ya existe, no se sobreescribira.")
+          chunks = split_documents(load_pdfs())
+          if not chunks:
+              raise SystemExit("No se pudieron extraer fragmentos de los PDF")
+          store = build_vectorstore(chunks, get_embeddings(), rebuild=False)
+          print("Indice temporal creado:", store._collection.count(), flush=True)
+          PY
+      - name: Prueba real .invoke sin LLM
+        run: python -m evaluacion.prueba_tool_base
       - name: Subir evidencia preliminar
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: avance3-preflight
-          path: evaluacion/resultados_avance3/preflight.json
+          path: |
+            evaluacion/resultados_avance3/preflight.json
+            evaluacion/resultados_avance3/prueba_buscar_en_base.json
           if-no-files-found: warn
           retention-days: 30
 
