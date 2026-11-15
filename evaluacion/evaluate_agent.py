@@ -27,7 +27,7 @@ from src.vectorstore import get_embeddings, load_vectorstore
 
 ROOT = Path(__file__).resolve().parents[1]
 DATASET_PATH = ROOT / "evaluacion" / "preguntas_ragas.json"
-OUTPUT_DIR = ROOT / "evaluacion" / "resultados_agente"
+OUTPUT_DIR = Path(os.getenv("RAGAS_OUTPUT_DIR", str(ROOT / "evaluacion" / "resultados_agente"))).resolve()
 METRIC_NAMES = ("faithfulness", "answer_relevancy", "context_precision", "context_recall")
 NO_ENCONTRADO = (
     "No encontré esto en los manuales. "
