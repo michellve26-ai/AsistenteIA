@@ -8,7 +8,6 @@ import csv
 import json
 import math
 import os
-import re
 import random
 from pathlib import Path
 
@@ -22,6 +21,7 @@ from ragas.metrics.collections import (
 )
 
 from src import config
+from evaluacion.ragas_rate_limit import quota_delay_seconds, retry_wait_seconds
 from src.rag_chain import get_llm, get_prompt_template, rag_pipeline
 from src.vectorstore import get_embeddings, load_vectorstore
 
@@ -132,15 +132,6 @@ def metric_inputs(name, row):
     if name == "answer_relevancy":
         return {**inputs, "response": row["answer"]}
     return {**inputs, "reference": row["ground_truth"], "retrieved_contexts": row["contexts"]}
-
-
-def quota_delay_seconds(error):
-    text = str(error)
-    # Esperas anunciadas por Groq en minutos, segundos u horas.
-    m = re.search(r"try again in\s*(?:(\d+)h)?(?:(\d+)m)?([\d.]+)s", text, re.I)
-    if m:
-        return 3600 * int(m.group(1) or 0) + 60 * int(m.group(2) or 0) + float(m.group(3))
-    return None
 
 
 def is_json_error(error):
@@ -330,12 +321,9 @@ async def main():
                                             raise
                                         if rate_attempt == MAX_RATE_RETRIES:
                                             raise
-                                        advertised = quota_delay_seconds(rate_exc)
-                                        if advertised is None:
-                                            advertised = 120
-                                        wait = max(15.0, advertised + 10.0)
-                                        if wait > MAX_WAIT_SECONDS:
-                                            print(f"[CUOTA] Espera requerida {wait:.1f}s supera el maximo {MAX_WAIT_SECONDS:.1f}s", flush=True)
+                                        wait = retry_wait_seconds(rate_exc, rate_attempt, MAX_WAIT_SECONDS)
+                                        if wait is None:
+                                            print("[CUOTA] Plazo anunciado supera el maximo permitido; se conserva el avance", flush=True)
                                             raise
                                         print(f"[CUOTA] 429; espera automatica {wait:.1f}s; reintento {rate_attempt+1}/{MAX_RATE_RETRIES}", flush=True)
                                         await asyncio.sleep(wait)
@@ -408,6 +396,8 @@ async def main():
     )
     if not complete:
         print("[PENDIENTE] Descargar el artefacto y reanudar con su run ID en GitHub Actions.", flush=True)
+        if os.getenv("RAGAS_STRICT_COMPLETION", "false").lower() == "true":
+            raise SystemExit(2)
 
 
 if __name__ == "__main__":
