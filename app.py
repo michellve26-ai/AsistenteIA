@@ -366,21 +366,24 @@ def safe_index_exists() -> bool:
         return False
 
 
+@st.cache_resource(ttl=120, show_spinner="Comprobando manuales PDF…")
+def _checked_auto_sync(_stamp, _manifest_stamp):
+    """Evita recalcular SHA-256 en cada mensaje; vuelve a comprobar al cambiar PDF."""
+    return ensure_index(_get_embeddings)
+
+
 def _auto_sync_index() -> None:
-    """Comprobar cambios en cada inicio/rerun; procesar PDF solo si es necesario."""
+    """Comprobar PDF al iniciar/rerun; publicar solo indices completos."""
     try:
-        # El snapshot ligero cambia si se agregan, borran o modifican PDF.
         snapshot = pdf_snapshot()
         if not snapshot:
             return
-        # La comprobacion segura usa huellas SHA-256 y manifiesto persistente.
-        # Solo cuando hay cambios se invalidan recursos que apuntan a Chroma.
-        changed = ensure_index(_get_embeddings)
+        changed = _checked_auto_sync(snapshot, manifest_stamp())
         if changed:
             _get_vectorstore.clear()
             st.session_state.astrea_notice = "Manuales PDF sincronizados automáticamente."
     except Exception as exc:
-        # No romper la interfaz ni borrar la base anterior ante un fallo de PDF.
+        # No romper el chat ni borrar el indice anterior si falla la indexacion.
         print(f"[AUTO-INDEX] Sincronizacion pendiente: {type(exc).__name__}: {exc}", flush=True)
         st.session_state.astrea_index_warning = (
             "No se pudo completar la actualización automática de los PDF. "
