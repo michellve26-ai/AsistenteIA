@@ -59,11 +59,11 @@ def main():
                 "tiempo_s": round(time.perf_counter() - begin, 3),
                 "respuesta": result["respuesta"],
             })
-        # Guardado progresivo para recuperar observaciones al alcanzar cuotas.
-        with destination.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=rows[0].keys())
-            writer.writeheader()
-            writer.writerows(rows)
+            # Guardado tras CADA respuesta para sobrevivir a una interrupcion de cuota.
+            with destination.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=rows[0].keys())
+                writer.writeheader()
+                writer.writerows(rows)
     for mode in ("Avance 2 fijo", "Avance 3 agente"):
         values = [r for r in rows if r["modo"] == mode]
         print(mode, {field: round(sum(r[field] for r in values) / len(values), 3)
