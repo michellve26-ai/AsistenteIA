@@ -5,6 +5,7 @@ Los resultados son observados y requieren revision humana antes de calificar.
 """
 import json
 import os
+import re
 from pathlib import Path
 
 from src.agent import ejecutar_agente
@@ -51,10 +52,10 @@ def main():
             "base_sin_web": case["id"] != 6 or "buscar_en_web" not in used,
             "seguridad": case["id"] != 7 or (not used and result["tipo"] == "rechazo_seguro"),
             "saldo_1": case["id"] != 3 or (
-                "calcular_saldo_factura" in used and "300000" in result["respuesta"].replace(".", "").replace(",", "")
+                "calcular_saldo_factura" in used and "300000" in re.sub(r"[^0-9]", "", result["respuesta"])
             ),
             "saldo_2": case["id"] != 4 or (
-                "calcular_saldo_factura" in used and "70000" in result["respuesta"].replace(".", "").replace(",", "")
+                "calcular_saldo_factura" in used and "70000" in re.sub(r"[^0-9]", "", result["respuesta"])
             ),
             "web_publica": case["id"] != 5 or (
                 "buscar_en_base" in used
