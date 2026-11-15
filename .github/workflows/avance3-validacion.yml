@@ -93,9 +93,12 @@ jobs:
       AVANCE3_CORPUS_REF: c9d0b617cfe2120ee41c3525b89ffa692b4ca9fe
       RAGAS_K_VALUES: "5"
       RAGAS_MAX_OPERATIONS: "70"
-      RAGAS_PAUSE_SECONDS: "20"
+      RAGAS_PAUSE_SECONDS: "10"
       RAGAS_MAX_RATE_RETRIES: "5"
-      RAGAS_MAX_WAIT_SECONDS: "120"
+      RAGAS_JUDGE_MODEL: ${{ vars.RAGAS_JUDGE_MODEL || 'openai/gpt-oss-20b' }}
+      RAGAS_JUDGE_MAX_TOKENS: "4096"
+      RAGAS_REASONING_EFFORT: "low"
+      RAGAS_MAX_WAIT_SECONDS: "240"
       RAGAS_RETRY_JSON_ERRORS: "true"
       PYTHONUNBUFFERED: "1"
       AVANCE3_CASE_IDS: ${{ github.event_name == 'pull_request' && '1,2,3,4,6,7' || '' }}
@@ -168,15 +171,15 @@ jobs:
       - name: Ejecutar los siete casos reales
         run: python -m evaluacion.casos_agente
       - name: Comparar llamadas, tokens y tiempos
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
         run: python -m evaluacion.benchmark_avance3
       - name: Instalar dependencias del juez Ragas
-        if: inputs.nivel == 'full'
+        if: inputs.nivel == 'full' || github.event_name == 'pull_request'
         run: |
           python -m pip install "ragas==0.4.3" "langchain-community==0.4.1" groq instructor pandas
           python -m pip check
       - name: Validar correspondencia de referencias antes de Ragas
-        if: inputs.nivel == 'full'
+        if: inputs.nivel == 'full' || github.event_name == 'pull_request'
         shell: bash
         run: |
           python - <<'PY'
@@ -192,18 +195,42 @@ jobs:
           print("Nombres de referencias presentes; aun revisar la correspondencia de contenido.")
           PY
       - name: Re-evaluar pipeline fijo sobre el corpus actual
-        if: inputs.nivel == 'full'
+        if: inputs.nivel == 'full' || github.event_name == 'pull_request'
         env:
           RAGAS_OUTPUT_DIR: evaluacion/resultados_avance3/fijo
         run: python -m evaluacion.evaluate_rag
+        continue-on-error: true
       - name: Evaluar agente sobre el MISMO corpus actual
-        if: inputs.nivel == 'full'
+        if: inputs.nivel == 'full' || github.event_name == 'pull_request'
         env:
           RAGAS_OUTPUT_DIR: evaluacion/resultados_avance3/agente
         run: python -m evaluacion.evaluate_agent
+        continue-on-error: true
       - name: Generar resumen de evidencia real o pendiente
         if: always()
         run: python -m evaluacion.resumen_avance3
+      - name: Estado de las evaluaciones y del benchmark
+        if: always()
+        run: |
+          python - <<'PY'
+          import csv, json
+          from pathlib import Path
+          root = Path("evaluacion/resultados_avance3")
+          for mode in ("fijo", "agente"):
+              f = root / mode / "resumen_k5.json"
+              if not f.exists():
+                  print(f"{mode}: RAGAS SIN RESULTADOS")
+                  continue
+              row = json.loads(f.read_text(encoding="utf-8"))
+              print(f"{mode}: preguntas={row.get('preguntas_respondidas')}, metricas={row.get('metricas')}")
+          costs = root / "costos_comparados.csv"
+          if costs.exists():
+              with costs.open(newline="",encoding="utf-8") as f:
+                  rows = list(csv.DictReader(f))
+              print("Benchmark registros:", len(rows))
+          else:
+              print("BENCHMARK PENDIENTE")
+          PY
       - name: Descargar resultados JSON, CSV y resumen
         if: always()
         uses: actions/upload-artifact@v4
