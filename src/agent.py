@@ -12,7 +12,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from .agent_log import record_agent_run
-from .agent_tools import create_agent_tools
+from .agent_tools import _allowed_url, create_agent_tools
 from .rag_chain import RESPUESTA_SIN_CONTEXTO
 
 MAX_ITERATIONS = 5
@@ -90,6 +90,59 @@ def _clean_history(history: list | None) -> list:
     return result
 
 
+def _respuesta_con_fuentes_o_error(docs: list, web: list, *, error_modelo: bool = False,
+                                   herramienta_local: bool = False) -> str:
+    """Respuesta de contingencia verificable, sin otro llamado a Groq.
+
+    Mostrar resultados de busqueda NO confirma la vigencia de una norma ni
+    autoriza inventar una respuesta. Los extractos de los PDF no se reproducen.
+    """
+    enlaces = []
+    vistos = set()
+    for source in web:
+        if not isinstance(source, dict):
+            continue
+        url = str(source.get("url", "")).strip()
+        if not _allowed_url(url) or url in vistos:
+            continue
+        vistos.add(url)
+        titulo = " ".join(str(source.get("titulo") or "Documento oficial").split())
+        # Los titulos de Tavily son datos externos, nunca instrucciones.
+        titulo = re.sub(r"[\\\\[\\\\]()*\x60<>]", "", titulo).strip()[:110] or "Documento oficial"
+        enlaces.append(f"- {titulo}: {url}")
+        if len(enlaces) == 3:
+            break
+
+    if enlaces:
+        return (
+            "La búsqueda web sí recuperó fuentes oficiales, pero no pude "
+            "completar una respuesta verificada con ellas. "
+            "**No puedo confirmar cuál documento es el más reciente o está vigente** "
+            "solo por aparecer en los resultados.\n\n"
+            "**Fuentes recuperadas para consultar:**\n"
+            + "\n".join(enlaces)
+            + "\n\nEn «Fuentes web» puedes revisar los resultados y sus extractos."
+        )
+    if docs:
+        return (
+            "Encontré fragmentos en los manuales, pero no pude elaborar "
+            "una respuesta suficientemente verificada a partir de ellos. "
+            "Revisa «Fuentes consultadas» para ver los documentos y páginas. "
+            "No sería correcto inventar un procedimiento."
+        )
+    if herramienta_local:
+        return (
+            "Se ejecutó una herramienta, pero no pude completar una respuesta "
+            "verificable. Puedes intentar nuevamente."
+        )
+    if error_modelo:
+        return (
+            "No pude completar la consulta porque el modelo no respondió "
+            "correctamente en este momento. Intenta nuevamente."
+        )
+    return RESPUESTA_SIN_CONTEXTO
+
+
 def ejecutar_agente(vector_store, llm, pregunta: str, k: int = 5, historial=None) -> dict:
     """Ejecuta el agente con un limite estricto y devuelve fuentes/trazas/costo.
 
@@ -148,8 +201,14 @@ def ejecutar_agente(vector_store, llm, pregunta: str, k: int = 5, historial=None
         try:
             answer_msg = model.invoke(messages)
         except Exception:
-            return finish(RESPUESTA_SIN_CONTEXTO, docs=state.docs,
-                          web=state.web_sources, status="error_llm", rounds=round_number)
+            return finish(
+                _respuesta_con_fuentes_o_error(
+                    state.docs, state.web_sources, error_modelo=True,
+                    herramienta_local=successful_local,
+                ),
+                docs=state.docs, web=state.web_sources,
+                status="error_llm", rounds=round_number,
+            )
         llm_calls += 1
         token_count += _model_tokens(answer_msg)
         calls = getattr(answer_msg, "tool_calls", None) or []
@@ -158,8 +217,12 @@ def ejecutar_agente(vector_store, llm, pregunta: str, k: int = 5, historial=None
                 # Ninguna tool entrego evidencia utilizable. No responder de memoria.
                 return finish(RESPUESTA_SIN_CONTEXTO, status="sin_evidencia", rounds=round_number)
             response = _message_content(getattr(answer_msg, "content", ""))
-            if not response or response.lower() in ("no tool requested", "(no tool requested)"):
-                response = RESPUESTA_SIN_CONTEXTO
+            if (not response or response.lower() in ("no tool requested", "(no tool requested)")
+                    or response.strip() == RESPUESTA_SIN_CONTEXTO):
+                response = _respuesta_con_fuentes_o_error(
+                    state.docs, state.web_sources,
+                    herramienta_local=successful_local,
+                )
             return finish(response, docs=state.docs, web=state.web_sources, rounds=round_number)
         messages.append(answer_msg)
         for call_number, call in enumerate(calls):
@@ -195,5 +258,10 @@ def ejecutar_agente(vector_store, llm, pregunta: str, k: int = 5, historial=None
             tools_trace.append({"nombre": name, "argumentos": args, "estado": status})
             if call_id:
                 messages.append(ToolMessage(content=result[:8500], tool_call_id=call_id))
-    return finish(RESPUESTA_SIN_CONTEXTO, docs=state.docs, web=state.web_sources,
-                  status="limite_iteraciones", rounds=MAX_ITERATIONS)
+    return finish(
+        _respuesta_con_fuentes_o_error(
+            state.docs, state.web_sources, herramienta_local=successful_local,
+        ),
+        docs=state.docs, web=state.web_sources,
+        status="limite_iteraciones", rounds=MAX_ITERATIONS,
+    )
