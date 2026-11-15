@@ -79,7 +79,7 @@ jobs:
           retention-days: 30
 
   reales:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     needs: codigo
     name: Herramientas reales, comportamiento y metricas
     runs-on: ubuntu-24.04
@@ -95,6 +95,7 @@ jobs:
       RAGAS_MAX_WAIT_SECONDS: "120"
       RAGAS_RETRY_JSON_ERRORS: "true"
       PYTHONUNBUFFERED: "1"
+      AVANCE3_CASE_IDS: ${{ github.event_name == 'pull_request' && '1,2,3,4,6,7' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -107,7 +108,7 @@ jobs:
         shell: bash
         run: |
           test -n "$GROQ_API_KEY" || (echo "Falta secret GROQ_API_KEY"; exit 1)
-          test -n "$TAVILY_API_KEY" || (echo "Falta secret TAVILY_API_KEY"; exit 1)
+          if [ -z "$TAVILY_API_KEY" ]; then echo "TAVILY_API_KEY ausente: caso web se validara con la captura de Render; agregar secreto para workflow completo"; fi
           echo "Secretos presentes; no se imprimen"
       - name: Recuperar resultados anteriores (opcional)
         if: inputs.resume_run_id != ''
@@ -141,6 +142,7 @@ jobs:
       - name: Ejecutar los siete casos reales
         run: python -m evaluacion.casos_agente
       - name: Comparar llamadas, tokens y tiempos
+        if: github.event_name == 'workflow_dispatch'
         run: python -m evaluacion.benchmark_avance3
       - name: Instalar dependencias del juez Ragas
         if: inputs.nivel == 'full'
