@@ -2,6 +2,7 @@ name: Astrea Avance 3 - Validacion reproducible
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "src/**"
       - "tests/**"
@@ -123,6 +124,22 @@ jobs:
         run: |
           python -m pip install "ragas==0.4.3" "langchain-community==0.4.1" groq instructor pandas
           python -m pip check
+      - name: Validar correspondencia de referencias antes de Ragas
+        if: inputs.nivel == 'full'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path("evaluacion/resultados_avance3/preflight.json").read_text(encoding="utf-8"))
+          missing = manifest.get("referencias_documentales_no_presentes", [])
+          if missing:
+              raise SystemExit(
+                  "No se ejecutara Ragas: las referencias mencionan documentos ausentes "
+                  "del corpus versionado. Resolver primero: " + ", ".join(missing)
+              )
+          print("Nombres de referencias presentes; aun revisar la correspondencia de contenido.")
+          PY
       - name: Re-evaluar pipeline fijo sobre el corpus actual
         if: inputs.nivel == 'full'
         env:
