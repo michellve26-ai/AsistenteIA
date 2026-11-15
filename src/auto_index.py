@@ -146,7 +146,14 @@ def ensure_index(embeddings_provider: Callable, *, force: bool = False) -> bool:
     Ante un fallo, conserva o recupera el indice anterior y propaga el error.
     """
     active = Path(config.PERSIST_DIR)
-    if active.resolve() in (Path.cwd().resolve(), Path(config.PDF_DIR).resolve()):
+    index_path = active.resolve()
+    pdf_path = Path(config.PDF_DIR).resolve()
+    if (
+        index_path == Path.cwd().resolve()
+        or index_path == pdf_path
+        or index_path in pdf_path.parents
+        or pdf_path in index_path.parents
+    ):
         raise ValueError("PERSIST_DIR debe ser una carpeta independiente de PDF y proyecto")
 
     with _exclusive_lock(active):
@@ -187,8 +194,10 @@ def ensure_index(embeddings_provider: Callable, *, force: bool = False) -> bool:
             )
             count = int(store._collection.count())
             del store
-            if count <= 0 or not (staging / "chroma.sqlite3").is_file():
-                raise RuntimeError("El nuevo indice no tiene una coleccion Chroma valida")
+            if count != len(chunks) or not (staging / "chroma.sqlite3").is_file():
+                raise RuntimeError(
+                    "El nuevo indice esta incompleto; se conserva el indice anterior"
+                )
             _write_manifest(staging, {**wanted, "fragments": count})
 
             moved_old = False
